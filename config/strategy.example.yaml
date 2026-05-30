@@ -1,0 +1,62 @@
+# Example strategy / application configuration.
+#
+# Copy this to `config/strategy.yaml` and edit. Secrets should be provided as
+# `${ENV_VAR}` placeholders and supplied via the environment or a `.env` file.
+
+robinhood:
+  # Robinhood agentic-trading MCP endpoint.
+  mcp_url: "https://agent.robinhood.com/mcp/trading"
+  # OAuth bearer token for your dedicated agent account.
+  api_token: "${ROBINHOOD_MCP_TOKEN}"
+
+llm:
+  # One of: openai | anthropic | openai-compatible | anthropic-compatible
+  provider: openai
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o"
+  temperature: 0.2
+  max_tokens: 2048
+  # For *-compatible providers, also set:
+  # base_url: "https://api.groq.com/openai/v1"
+
+strategy:
+  name: "Conservative Momentum"
+  description: "Buy large-cap tech near 52-week lows. Exit on stop-loss or take-profit."
+  watchlist: [AAPL, MSFT, NVDA, GOOGL, META]
+
+  # Structured thresholds — enforced by the program (the LLM cannot override).
+  structured:
+    stop_loss_pct: 5.0            # Sell if a position is down more than 5%.
+    take_profit_pct: 15.0         # Sell if a position is up more than 15%.
+    max_positions: 3              # Maximum simultaneous holdings.
+    min_confidence: 0.70          # Ignore low-confidence decisions.
+    buy_filters:
+      max_pe_ratio: 30.0          # Skip buys with P/E above this (null = off).
+      max_price_vs_52w_high_pct: 90.0
+      min_volume_ratio: 0.80
+
+  # Free-text judgment rules — passed verbatim to the LLM.
+  rules:
+    - "Prefer companies with strong cash flow and low debt"
+    - "Avoid buying within 5 trading days of an earnings announcement"
+    - "When multiple buy signals exist, prefer the symbol closest to its 52-week low"
+
+risk:
+  dry_run: true                   # MUST be false to place real orders.
+  max_trade_usd: 500.0            # Hard cap on any single order's value.
+  max_position_pct: 0.10          # No position may exceed 10% of equity.
+  max_daily_trades: 5             # Circuit breaker.
+  min_cash_reserve_pct: 0.20      # Informational; surfaced to the LLM.
+  allow_buys: true
+  allow_sells: true
+
+scheduler:
+  interval_minutes: 15
+
+audit:
+  log_dir: "./logs"
+  log_file: "audit.jsonl"
+
+simulation:
+  starting_cash: 10000.0
+  portfolio_path: "./simulation/portfolio.json"
