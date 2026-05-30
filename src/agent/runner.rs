@@ -182,7 +182,7 @@ impl TradingAgent {
              - Per-trade cap and position-size caps are enforced; oversized orders are rejected.\n\n\
              === JUDGMENT RULES (apply your reasoning) ===\n{judgment}\n\n\
              === INSTRUCTIONS ===\n\
-             - Only trade symbols on the watchlist: {watchlist:?}\n\
+             - {watchlist_instruction}\n\
              - ALWAYS read the portfolio and fetch quotes with the available tools BEFORE ordering.\n\
              - HOLD is always acceptable; only trade when the rules clearly support it.\n\
              - When you place an order, include the symbol, quantity, and (if known) price.\n\
@@ -196,17 +196,25 @@ impl TradingAgent {
             minconf = s.min_confidence,
             filters = format_buy_filters(&s.buy_filters),
             judgment = judgment,
-            watchlist = self.strategy.watchlist,
+            watchlist_instruction = if self.strategy.watchlist.is_empty() {
+                "You may trade any symbol available through the tools. Use your judgment to select candidates.".to_string()
+            } else {
+                format!("Only trade symbols on the watchlist: {:?}", self.strategy.watchlist)
+            },
         )
     }
 
     fn build_user_message(&self) -> String {
+        let scope = if self.strategy.watchlist.is_empty() {
+            "any symbols you deem appropriate".to_string()
+        } else {
+            format!("the watchlist {:?}", self.strategy.watchlist)
+        };
         format!(
-            "Current time: {}. Review my portfolio and the watchlist {:?}, then \
-             execute the trading strategy for this cycle. Apply all rules and place \
-             any warranted orders using the tools.",
+            "Current time: {}. Review my portfolio and {scope}, then execute the \
+             trading strategy for this cycle. Apply all rules and place any warranted \
+             orders using the tools.",
             Utc::now().format("%Y-%m-%d %H:%M UTC"),
-            self.strategy.watchlist,
         )
     }
 

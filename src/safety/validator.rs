@@ -115,8 +115,8 @@ impl SafetyValidator {
             });
         let is_buy = side.contains("buy");
 
-        // Symbol must be on the watchlist.
-        if !self.watchlist.contains(&symbol) {
+        // Symbol must be on the watchlist (if a watchlist is configured).
+        if !self.watchlist.is_empty() && !self.watchlist.contains(&symbol) {
             return Err(reject(&format!("{symbol} is not on the watchlist")));
         }
 
@@ -349,6 +349,18 @@ mod tests {
         let v = SafetyValidator::new(Arc::new(NoopInner), risk(false), &strategy());
         let out = v
             .execute("place_order", json!({ "symbol": "AAPL", "quantity": 1, "price": 100 }))
+            .await
+            .unwrap();
+        assert_eq!(out["state"], json!("filled"));
+    }
+
+    #[tokio::test]
+    async fn empty_watchlist_allows_any_symbol() {
+        let mut s = strategy();
+        s.watchlist = vec![];
+        let v = SafetyValidator::new(Arc::new(NoopInner), risk(false), &s);
+        let out = v
+            .execute("place_order", json!({ "symbol": "TSLA", "quantity": 1, "price": 100 }))
             .await
             .unwrap();
         assert_eq!(out["state"], json!("filled"));

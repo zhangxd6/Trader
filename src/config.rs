@@ -245,11 +245,6 @@ impl AppConfig {
 
     /// Sanity-check values that serde alone cannot enforce.
     fn validate(&self) -> Result<()> {
-        if self.strategy.watchlist.is_empty() {
-            return Err(TraderError::Config(
-                "strategy.watchlist must not be empty".into(),
-            ));
-        }
         if self.risk.max_trade_usd <= 0.0 {
             return Err(TraderError::Config(
                 "risk.max_trade_usd must be positive".into(),

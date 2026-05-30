@@ -22,6 +22,8 @@ llm:
 strategy:
   name: "Conservative Momentum"
   description: "Buy large-cap tech near 52-week lows. Exit on stop-loss or take-profit."
+  # Restrict trading to these symbols. Omit (or leave empty) to let the LLM
+  # choose any symbol available through the Robinhood tools.
   watchlist: [AAPL, MSFT, NVDA, GOOGL, META]
 
   # Structured thresholds — enforced by the program (the LLM cannot override).
