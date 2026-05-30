@@ -27,3 +27,6 @@ config/strategy.yaml
 # Runtime artifacts
 logs/
 simulation/
+
+# Claude Code session data
+.claude/
