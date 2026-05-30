@@ -8,63 +8,75 @@ robinhood:
   api_token: "${ROBINHOOD_MCP_TOKEN}"
 
 llm:
-  provider: openai
-  api_key: "${OPENAI_API_KEY}"
-  model: "gpt-4o"
+  provider: anthropic
+  api_key: "${ANTHROPIC_API_KEY}"
+  model: "claude-sonnet-4-6"
   temperature: 0.2
   max_tokens: 2048
+  # Other supported providers:
+  #   provider: openai
+  #   api_key: "${OPENAI_API_KEY}"
+  #   model: "gpt-4o"
+  #
+  #   provider: openai-compatible   # Groq, Ollama, Azure, Together, ...
+  #   api_key: "${GROQ_API_KEY}"
+  #   model: "llama-3.3-70b-versatile"
+  #   base_url: "https://api.groq.com/openai/v1"
+  #
+  #   provider: anthropic-compatible  # custom Claude proxy / gateway
+  #   api_key: "${PROXY_API_KEY}"
+  #   model: "claude-sonnet-4-6"
+  #   base_url: "https://my-proxy.internal/v1/messages"
 
-# Define one or more strategies. Each runs sequentially every scheduler tick.
-# Use `strategy:` (singular) as a shorthand when you only have one.
-strategies:
-  - name: "Conservative Momentum"
-    description: "Buy large-cap tech near 52-week lows. Exit on stop-loss or take-profit."
-    # Restrict to these symbols (optional — omit or set to [] to trade any symbol).
-    watchlist: [AAPL, MSFT, NVDA, GOOGL, META]
-    # Focus industries / sectors (optional — used as guidance when watchlist is empty or combined with it).
-    # industries: []
-    structured:
-      stop_loss_pct: 5.0
-      take_profit_pct: 15.0
-      max_positions: 3
-      min_confidence: 0.70
-      buy_filters:
-        max_pe_ratio: 30.0
-        max_price_vs_52w_high_pct: 90.0
-        min_volume_ratio: 0.80
-    rules:
-      - "Prefer companies with strong cash flow and low debt"
-      - "Avoid buying within 5 trading days of an earnings announcement"
-      - "When multiple buy signals exist, prefer the symbol closest to its 52-week low"
+# ── Single-strategy shorthand ────────────────────────────────────────────────
+# Use `strategy:` (singular) when you only need one. The system automatically
+# wraps it in a list. To run multiple strategies per tick, switch to
+# `strategies:` (plural) — see the multi-strategy example at the bottom.
 
-  - name: "AI & Energy Thematic"
-    description: "Capture momentum in AI infrastructure and energy transition companies."
-    # No fixed watchlist — let the LLM discover symbols in these industries.
-    watchlist: []
-    industries: [AI, Semiconductors, Data Centers, Renewable Energy, Nuclear Energy]
-    structured:
-      stop_loss_pct: 8.0
-      take_profit_pct: 25.0
-      max_positions: 5
-      min_confidence: 0.65
-      buy_filters:
-        max_pe_ratio: 60.0
-    rules:
-      - "Prefer companies with direct AI infrastructure revenue (chips, data centres, power)"
-      - "Weight toward profitable companies; tolerate high P/E only with strong revenue growth"
-      - "For energy plays, prefer companies with a clear path to AI-related demand growth"
+strategy:
+  name: "Mag7 Dip Buyer"
+  description: >
+    Buy the Magnificent 7 when they pull back from recent highs. Hold for
+    momentum recovery. Exit on stop-loss or take-profit. Never chase; only
+    enter on weakness. Preserve at least 30% cash at all times.
+
+  # Hard enforcement: only these tickers will ever be traded (Rust-enforced).
+  # Omit or set to [] to let the LLM choose freely.
+  watchlist: [AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA]
+
+  # Sector guidance injected into the LLM prompt. Helps it reason about
+  # industry context. Combined with watchlist = hard list + soft context.
+  industries: [Technology, AI, Cloud Computing, Electric Vehicles]
+
+  # Structured thresholds — enforced by Rust regardless of LLM output.
+  structured:
+    stop_loss_pct:    6.0    # Sell if a position is down more than 6%
+    take_profit_pct: 20.0    # Sell if a position is up more than 20%
+    max_positions:    4      # Hold at most 4 names at once
+    min_confidence:   0.75   # Ignore decisions below this confidence score
+    buy_filters:
+      max_price_vs_52w_high_pct: 85.0  # Only buy if <= 85% of 52-week high
+      min_volume_ratio: 0.90           # Skip if today's volume < 90% of average
+
+  # Free-text judgment rules — passed verbatim to the LLM prompt.
+  rules:
+    - "Only BUY on a clear pullback — at least 5% below a recent local high"
+    - "Do not open a new position if the broad market (SPY) is in a confirmed downtrend"
+    - "Prioritise NVDA and MSFT for AI exposure; treat TSLA as higher-risk"
+    - "If two signals tie, pick the name with the smaller existing position"
+    - "Never add to a position that is already at a loss"
 
 risk:
-  dry_run: true                   # MUST be false to place real orders.
-  max_trade_usd: 500.0            # Hard cap on any single order's value.
-  max_position_pct: 0.10          # No position may exceed 10% of equity.
-  max_daily_trades: 5             # Circuit breaker.
-  min_cash_reserve_pct: 0.20      # Informational; surfaced to the LLM.
+  dry_run: true          # MUST be false to place real orders
+  max_trade_usd: 1000.0  # Hard cap per order
+  max_position_pct: 0.20 # No single stock > 20% of portfolio
+  max_daily_trades: 4    # Circuit breaker: at most 4 orders per day
+  min_cash_reserve_pct: 0.30  # Always keep 30% in cash
   allow_buys: true
   allow_sells: true
 
 scheduler:
-  interval_minutes: 15
+  interval_minutes: 30   # Run every 30 minutes during market hours
 
 audit:
   log_dir: "./logs"
@@ -73,3 +85,41 @@ audit:
 simulation:
   starting_cash: 10000.0
   portfolio_path: "./simulation/portfolio.json"
+
+
+# ── Multi-strategy example ───────────────────────────────────────────────────
+# Uncomment and replace the `strategy:` block above to run multiple strategies
+# sequentially on every scheduler tick.
+#
+# strategies:
+#   - name: "Mag7 Dip Buyer"
+#     description: "Buy Mag7 on pullbacks."
+#     watchlist: [AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA]
+#     industries: [Technology, AI, Cloud Computing, Electric Vehicles]
+#     structured:
+#       stop_loss_pct: 6.0
+#       take_profit_pct: 20.0
+#       max_positions: 4
+#       min_confidence: 0.75
+#       buy_filters:
+#         max_price_vs_52w_high_pct: 85.0
+#         min_volume_ratio: 0.90
+#     rules:
+#       - "Only BUY on a clear pullback of at least 5% from a recent local high"
+#       - "Prioritise NVDA and MSFT; treat TSLA as higher-risk"
+#
+#   - name: "AI & Energy Thematic"
+#     description: "Capture momentum in AI infrastructure and energy transition."
+#     watchlist: []   # empty: LLM discovers candidates from the industries list
+#     industries: [AI, Semiconductors, Data Centers, Renewable Energy, Nuclear Energy]
+#     structured:
+#       stop_loss_pct: 8.0
+#       take_profit_pct: 25.0
+#       max_positions: 5
+#       min_confidence: 0.65
+#       buy_filters:
+#         max_pe_ratio: 60.0
+#     rules:
+#       - "Prefer companies with direct AI infrastructure revenue"
+#       - "Tolerate high P/E only with strong, accelerating revenue growth"
+#       - "For energy plays, prioritise companies serving AI data-centre power demand"
