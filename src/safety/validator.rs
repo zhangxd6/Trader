@@ -285,6 +285,7 @@ mod tests {
             name: "T".into(),
             description: String::new(),
             watchlist: vec!["AAPL".into(), "MSFT".into()],
+            industries: vec![],
             structured: StructuredRules {
                 stop_loss_pct: 5.0,
                 take_profit_pct: 15.0,

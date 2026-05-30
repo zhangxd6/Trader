@@ -26,6 +26,12 @@ strategy:
   # choose any symbol available through the Robinhood tools.
   watchlist: [AAPL, MSFT, NVDA, GOOGL, META]
 
+  # Industry / sector focus. The LLM will use Robinhood MCP search and
+  # discovery tools to find candidates in these sectors each cycle.
+  # Can be used alone (omit watchlist) or alongside a watchlist.
+  # Examples: AI, energy, semiconductors, biotech, fintech, renewables
+  # industries: [AI, energy]
+
   # Structured thresholds — enforced by the program (the LLM cannot override).
   structured:
     stop_loss_pct: 5.0            # Sell if a position is down more than 5%.

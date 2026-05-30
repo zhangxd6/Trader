@@ -95,7 +95,14 @@ pub struct StrategyConfig {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// Explicit symbol allow-list. Empty means the LLM may choose any symbol.
+    #[serde(default)]
     pub watchlist: Vec<String>,
+    /// Industry / sector focus (e.g. "AI", "energy", "semiconductors").
+    /// The LLM is instructed to use MCP discovery tools to find candidates
+    /// within these sectors. May be combined with or used instead of `watchlist`.
+    #[serde(default)]
+    pub industries: Vec<String>,
     pub structured: StructuredRules,
     #[serde(default)]
     pub rules: Vec<String>,
