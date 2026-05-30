@@ -1,0 +1,57 @@
+[package]
+name = "trader"
+version = "0.1.0"
+edition = "2021"
+description = "LLM-driven Robinhood agentic trading agent"
+license = "Apache-2.0"
+
+[[bin]]
+name = "trader"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client (rustls to avoid OpenSSL system dependency)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Async traits
+async-trait = "0.1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.9"
+
+# Identifiers
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Environment
+dotenvy = "0.15"
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Stream utilities (for crossterm EventStream)
+futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
