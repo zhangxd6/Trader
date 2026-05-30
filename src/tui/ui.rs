@@ -26,7 +26,11 @@ pub fn render(f: &mut Frame, app: &App) {
 }
 
 fn render_strategy(f: &mut Frame, app: &App, area: Rect) {
-    let s = &app.strategy.structured;
+    let strategy = match app.strategies.get(app.active_strategy_idx) {
+        Some(s) => s,
+        None => return,
+    };
+    let s = &strategy.structured;
     let mode_color = match app.mode {
         RunMode::Live => Color::Red,
         RunMode::DryRun => Color::Yellow,
@@ -35,7 +39,7 @@ fn render_strategy(f: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![
         Line::from(Span::styled(
-            app.strategy.name.clone(),
+            strategy.name.clone(),
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
@@ -64,11 +68,31 @@ fn render_strategy(f: &mut Frame, app: &App, area: Rect) {
         "JUDGMENT RULES",
         Style::default().fg(Color::Yellow),
     )));
-    for (i, rule) in app.strategy.rules.iter().enumerate() {
+    for (i, rule) in strategy.rules.iter().enumerate() {
         lines.push(Line::from(format!("  {}. {}", i + 1, rule)));
     }
 
-    let block = Block::default().borders(Borders::ALL).title(" Strategy ");
+    if !strategy.industries.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "INDUSTRIES",
+            Style::default().fg(Color::Yellow),
+        )));
+        for ind in &strategy.industries {
+            lines.push(Line::from(format!("  \u{2022} {ind}")));
+        }
+    }
+
+    let title = if app.strategies.len() > 1 {
+        format!(
+            " Strategy {}/{} ",
+            app.active_strategy_idx + 1,
+            app.strategies.len()
+        )
+    } else {
+        " Strategy ".to_string()
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
     f.render_widget(Paragraph::new(lines).block(block), area);
 }
 

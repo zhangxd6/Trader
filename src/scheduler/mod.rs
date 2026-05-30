@@ -13,12 +13,13 @@ use crate::agent::TradingAgent;
 use crate::tui::AppEvent;
 
 /// Run the trading loop forever: tick every `interval_minutes`, and on each
-/// tick run a cycle if the US equity market is open.
+/// tick run all agents sequentially if the US equity market is open.
 ///
-/// If `events` is provided, market-status and next-cycle updates are forwarded
-/// to the TUI. Cycle errors are logged but never terminate the loop.
+/// If `events` is provided, market-status, next-cycle, and per-strategy
+/// updates are forwarded to the TUI. Cycle errors are logged but never
+/// terminate the loop.
 pub async fn run_trading_loop(
-    agent: Arc<TradingAgent>,
+    agents: Vec<Arc<TradingAgent>>,
     interval_minutes: u64,
     events: Option<mpsc::Sender<AppEvent>>,
 ) {
@@ -40,10 +41,15 @@ pub async fn run_trading_loop(
             continue;
         }
 
-        if let Err(e) = agent.run_cycle().await {
-            tracing::error!(error = %e, "trading cycle failed");
+        for (idx, agent) in agents.iter().enumerate() {
             if let Some(tx) = &events {
-                let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                let _ = tx.send(AppEvent::StrategyActive(idx)).await;
+            }
+            if let Err(e) = agent.run_cycle().await {
+                tracing::error!(error = %e, "trading cycle failed");
+                if let Some(tx) = &events {
+                    let _ = tx.send(AppEvent::Error(e.to_string())).await;
+                }
             }
         }
     }

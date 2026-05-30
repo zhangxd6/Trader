@@ -4,50 +4,55 @@
 # `${ENV_VAR}` placeholders and supplied via the environment or a `.env` file.
 
 robinhood:
-  # Robinhood agentic-trading MCP endpoint.
   mcp_url: "https://agent.robinhood.com/mcp/trading"
-  # OAuth bearer token for your dedicated agent account.
   api_token: "${ROBINHOOD_MCP_TOKEN}"
 
 llm:
-  # One of: openai | anthropic | openai-compatible | anthropic-compatible
   provider: openai
   api_key: "${OPENAI_API_KEY}"
   model: "gpt-4o"
   temperature: 0.2
   max_tokens: 2048
-  # For *-compatible providers, also set:
-  # base_url: "https://api.groq.com/openai/v1"
 
-strategy:
-  name: "Conservative Momentum"
-  description: "Buy large-cap tech near 52-week lows. Exit on stop-loss or take-profit."
-  # Restrict trading to these symbols. Omit (or leave empty) to let the LLM
-  # choose any symbol available through the Robinhood tools.
-  watchlist: [AAPL, MSFT, NVDA, GOOGL, META]
+# Define one or more strategies. Each runs sequentially every scheduler tick.
+# Use `strategy:` (singular) as a shorthand when you only have one.
+strategies:
+  - name: "Conservative Momentum"
+    description: "Buy large-cap tech near 52-week lows. Exit on stop-loss or take-profit."
+    # Restrict to these symbols (optional — omit or set to [] to trade any symbol).
+    watchlist: [AAPL, MSFT, NVDA, GOOGL, META]
+    # Focus industries / sectors (optional — used as guidance when watchlist is empty or combined with it).
+    # industries: []
+    structured:
+      stop_loss_pct: 5.0
+      take_profit_pct: 15.0
+      max_positions: 3
+      min_confidence: 0.70
+      buy_filters:
+        max_pe_ratio: 30.0
+        max_price_vs_52w_high_pct: 90.0
+        min_volume_ratio: 0.80
+    rules:
+      - "Prefer companies with strong cash flow and low debt"
+      - "Avoid buying within 5 trading days of an earnings announcement"
+      - "When multiple buy signals exist, prefer the symbol closest to its 52-week low"
 
-  # Industry / sector focus. The LLM will use Robinhood MCP search and
-  # discovery tools to find candidates in these sectors each cycle.
-  # Can be used alone (omit watchlist) or alongside a watchlist.
-  # Examples: AI, energy, semiconductors, biotech, fintech, renewables
-  # industries: [AI, energy]
-
-  # Structured thresholds — enforced by the program (the LLM cannot override).
-  structured:
-    stop_loss_pct: 5.0            # Sell if a position is down more than 5%.
-    take_profit_pct: 15.0         # Sell if a position is up more than 15%.
-    max_positions: 3              # Maximum simultaneous holdings.
-    min_confidence: 0.70          # Ignore low-confidence decisions.
-    buy_filters:
-      max_pe_ratio: 30.0          # Skip buys with P/E above this (null = off).
-      max_price_vs_52w_high_pct: 90.0
-      min_volume_ratio: 0.80
-
-  # Free-text judgment rules — passed verbatim to the LLM.
-  rules:
-    - "Prefer companies with strong cash flow and low debt"
-    - "Avoid buying within 5 trading days of an earnings announcement"
-    - "When multiple buy signals exist, prefer the symbol closest to its 52-week low"
+  - name: "AI & Energy Thematic"
+    description: "Capture momentum in AI infrastructure and energy transition companies."
+    # No fixed watchlist — let the LLM discover symbols in these industries.
+    watchlist: []
+    industries: [AI, Semiconductors, Data Centers, Renewable Energy, Nuclear Energy]
+    structured:
+      stop_loss_pct: 8.0
+      take_profit_pct: 25.0
+      max_positions: 5
+      min_confidence: 0.65
+      buy_filters:
+        max_pe_ratio: 60.0
+    rules:
+      - "Prefer companies with direct AI infrastructure revenue (chips, data centres, power)"
+      - "Weight toward profitable companies; tolerate high P/E only with strong revenue growth"
+      - "For energy plays, prefer companies with a clear path to AI-related demand growth"
 
 risk:
   dry_run: true                   # MUST be false to place real orders.
