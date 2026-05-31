@@ -206,7 +206,8 @@ async fn cmd_simulate(
     drive(config, style, RunMode::Simulate, false, tools, inner, Some(portfolio)).await
 }
 
-/// Shared driver: assemble the agent and run it once, in a loop, or with a TUI.
+/// Shared driver: assemble one agent per strategy and run them once, in a loop,
+/// or with a TUI.
 async fn drive(
     config: &AppConfig,
     style: RunStyle,
@@ -216,53 +217,62 @@ async fn drive(
     inner: Arc<dyn ToolExecutor>,
     sim_portfolio: Option<Arc<RwLock<SimulatedPortfolio>>>,
 ) -> Result<()> {
-    let validator: Arc<dyn ToolExecutor> = Arc::new(SafetyValidator::new(
-        inner,
-        config.risk.clone(),
-        &config.strategy,
-    ));
     let audit = Arc::new(AuditLogger::open(&config.audit.log_dir, &config.audit.log_file).await?);
     let llm = llm::build_provider(&config.llm);
 
     let (events_tx, events_rx) = mpsc::channel::<AppEvent>(256);
     let with_tui = matches!(style, RunStyle::Tui);
-    // The agent emits events only when a TUI is attached.
     let agent_events = if with_tui { Some(events_tx.clone()) } else { None };
 
-    let agent = Arc::new(TradingAgent::new(
-        llm,
-        validator,
-        tools,
-        config.strategy.clone(),
-        mode,
-        dry_run,
-        audit,
-        agent_events,
-        sim_portfolio,
-    ));
+    // One agent per strategy, each with its own SafetyValidator (own watchlist).
+    let agents: Vec<Arc<TradingAgent>> = config
+        .strategies
+        .iter()
+        .map(|strategy| {
+            let validator: Arc<dyn ToolExecutor> = Arc::new(SafetyValidator::new(
+                inner.clone(),
+                config.risk.clone(),
+                strategy,
+            ));
+            Arc::new(TradingAgent::new(
+                llm.clone(),
+                validator,
+                tools.clone(),
+                strategy.clone(),
+                mode,
+                dry_run,
+                audit.clone(),
+                agent_events.clone(),
+                sim_portfolio.clone(),
+            ))
+        })
+        .collect();
 
     match style {
         RunStyle::Once => {
-            agent.run_cycle().await?;
+            for agent in &agents {
+                agent.run_cycle().await?;
+            }
             println!("Cycle complete. See {} for the audit trail.", config.audit.log_file);
         }
         RunStyle::Loop => {
             println!(
-                "Starting trading loop ({}, every {} min). Ctrl-C to stop.",
+                "Starting trading loop ({}, {} {}, every {} min). Ctrl-C to stop.",
                 mode.label(),
+                agents.len(),
+                if agents.len() == 1 { "strategy" } else { "strategies" },
                 config.scheduler.interval_minutes
             );
-            scheduler::run_trading_loop(agent, config.scheduler.interval_minutes, None).await;
+            scheduler::run_trading_loop(agents, config.scheduler.interval_minutes, None).await;
         }
         RunStyle::Tui => {
-            let app = App::new(config.strategy.clone(), mode);
+            let app = App::new(config.strategies.clone(), mode);
             let interval = config.scheduler.interval_minutes;
-            let agent_for_loop = agent.clone();
             // The scheduler loop shares the same sender so the TUI also sees
             // market-status and next-cycle updates.
             let loop_tx = events_tx.clone();
             let handle = tokio::spawn(async move {
-                scheduler::run_trading_loop(agent_for_loop, interval, Some(loop_tx)).await;
+                scheduler::run_trading_loop(agents, interval, Some(loop_tx)).await;
             });
             // Drop our spare sender so the channel closes once the loop ends.
             drop(events_tx);

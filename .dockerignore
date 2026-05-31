@@ -1,0 +1,8 @@
+target/
+.env
+config/strategy.yaml
+logs/
+simulation/
+.claude/
+*.rs.bk
+*.pdb

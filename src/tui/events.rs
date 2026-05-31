@@ -24,6 +24,7 @@ pub enum AppEvent {
     CycleComplete { executed: usize, held: usize },
     NextCycle(DateTime<Utc>),
     MarketStatus(bool),
+    StrategyActive(usize),
     Error(String),
 }
 
@@ -47,6 +48,11 @@ impl App {
             }
             AppEvent::NextCycle(t) => self.next_cycle = Some(t),
             AppEvent::MarketStatus(open) => self.market_open = open,
+            AppEvent::StrategyActive(idx) => {
+                if idx < self.strategies.len() {
+                    self.active_strategy_idx = idx;
+                }
+            }
             AppEvent::Error(e) => {
                 self.push_log(LogEntry {
                     timestamp: Utc::now(),

@@ -13,7 +13,7 @@ use crate::error::{Result, TraderError};
 pub struct AppConfig {
     pub robinhood: RobinhoodConfig,
     pub llm: LlmConfig,
-    pub strategy: StrategyConfig,
+    pub strategies: Vec<StrategyConfig>,
     pub risk: RiskConfig,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
@@ -95,7 +95,14 @@ pub struct StrategyConfig {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// Explicit symbol allow-list. Empty means the LLM may choose any symbol.
+    #[serde(default)]
     pub watchlist: Vec<String>,
+    /// Industry / sector focus (e.g. "AI", "energy", "semiconductors").
+    /// The LLM is instructed to use MCP discovery tools to find candidates
+    /// within these sectors. May be combined with or used instead of `watchlist`.
+    #[serde(default)]
+    pub industries: Vec<String>,
     pub structured: StructuredRules,
     #[serde(default)]
     pub rules: Vec<String>,
@@ -225,17 +232,39 @@ fn default_sim_path() -> String {
     "./simulation/portfolio.json".to_string()
 }
 
+/// If the YAML has a top-level `strategy:` key (singular) but no `strategies:`
+/// key, wrap the single mapping in a one-element sequence under `strategies:`.
+/// This provides backward compatibility with single-strategy config files.
+fn normalize_strategies(value: &mut serde_yaml::Value) {
+    if let serde_yaml::Value::Mapping(map) = value {
+        let has_strategies = map.contains_key(serde_yaml::Value::String("strategies".into()));
+        let has_strategy = map.contains_key(serde_yaml::Value::String("strategy".into()));
+        if has_strategy && !has_strategies {
+            if let Some(single) = map.remove(serde_yaml::Value::String("strategy".into())) {
+                map.insert(
+                    serde_yaml::Value::String("strategies".into()),
+                    serde_yaml::Value::Sequence(vec![single]),
+                );
+            }
+        }
+    }
+}
+
 impl AppConfig {
     /// Load and parse configuration from a YAML file, expanding `${ENV}`
     /// placeholders inside string *values* against the process environment.
     ///
     /// Expansion happens after YAML parsing so that placeholders appearing in
     /// comments are ignored.
+    ///
+    /// For backward compatibility, a top-level `strategy:` (singular) key is
+    /// automatically promoted to a one-element `strategies:` list.
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .map_err(|e| TraderError::Config(format!("reading {}: {e}", path.display())))?;
         let mut value: serde_yaml::Value = serde_yaml::from_str(&raw)
             .map_err(|e| TraderError::Config(format!("parsing {}: {e}", path.display())))?;
+        normalize_strategies(&mut value);
         expand_env_value(&mut value)?;
         let config: AppConfig = serde_yaml::from_value(value)
             .map_err(|e| TraderError::Config(format!("parsing {}: {e}", path.display())))?;
@@ -245,9 +274,9 @@ impl AppConfig {
 
     /// Sanity-check values that serde alone cannot enforce.
     fn validate(&self) -> Result<()> {
-        if self.strategy.watchlist.is_empty() {
+        if self.strategies.is_empty() {
             return Err(TraderError::Config(
-                "strategy.watchlist must not be empty".into(),
+                "at least one strategy must be defined under `strategies:`".into(),
             ));
         }
         if self.risk.max_trade_usd <= 0.0 {
@@ -263,12 +292,14 @@ impl AppConfig {
         Ok(())
     }
 
-    /// Normalised, uppercase watchlist symbols.
+    /// Normalised, uppercase watchlist symbols aggregated across all strategies.
     pub fn watchlist_upper(&self) -> Vec<String> {
-        self.strategy
-            .watchlist
+        let mut seen = std::collections::HashSet::new();
+        self.strategies
             .iter()
+            .flat_map(|s| s.watchlist.iter())
             .map(|s| s.trim().to_uppercase())
+            .filter(|s| seen.insert(s.clone()))
             .collect()
     }
 }
@@ -342,5 +373,45 @@ mod tests {
     fn expand_env_passes_through_plain_text() {
         let result = expand_env("no placeholders here").unwrap();
         assert_eq!(result, "no placeholders here");
+    }
+
+    #[test]
+    fn normalize_strategies_promotes_singular() {
+        let yaml = r#"
+strategy:
+  name: Test
+  watchlist: [AAPL]
+  structured:
+    stop_loss_pct: 5.0
+    take_profit_pct: 15.0
+    max_positions: 3
+"#;
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        normalize_strategies(&mut value);
+        let map = value.as_mapping().unwrap();
+        assert!(map.contains_key(&serde_yaml::Value::String("strategies".into())));
+        assert!(!map.contains_key(&serde_yaml::Value::String("strategy".into())));
+        let strategies = map
+            .get(&serde_yaml::Value::String("strategies".into()))
+            .unwrap();
+        assert_eq!(strategies.as_sequence().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn normalize_strategies_leaves_plural_untouched() {
+        let yaml = r#"
+strategies:
+  - name: Test
+    watchlist: [AAPL]
+    structured:
+      stop_loss_pct: 5.0
+      take_profit_pct: 15.0
+      max_positions: 3
+"#;
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        normalize_strategies(&mut value);
+        let map = value.as_mapping().unwrap();
+        assert!(map.contains_key(&serde_yaml::Value::String("strategies".into())));
+        assert!(!map.contains_key(&serde_yaml::Value::String("strategy".into())));
     }
 }

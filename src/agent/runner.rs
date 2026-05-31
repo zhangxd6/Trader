@@ -182,7 +182,8 @@ impl TradingAgent {
              - Per-trade cap and position-size caps are enforced; oversized orders are rejected.\n\n\
              === JUDGMENT RULES (apply your reasoning) ===\n{judgment}\n\n\
              === INSTRUCTIONS ===\n\
-             - Only trade symbols on the watchlist: {watchlist:?}\n\
+             - {scope_instruction}\n\
+             {industry_instruction}\
              - ALWAYS read the portfolio and fetch quotes with the available tools BEFORE ordering.\n\
              - HOLD is always acceptable; only trade when the rules clearly support it.\n\
              - When you place an order, include the symbol, quantity, and (if known) price.\n\
@@ -196,17 +197,28 @@ impl TradingAgent {
             minconf = s.min_confidence,
             filters = format_buy_filters(&s.buy_filters),
             judgment = judgment,
-            watchlist = self.strategy.watchlist,
+            scope_instruction = format_scope_instruction(&self.strategy.watchlist),
+            industry_instruction = format_industry_instruction(&self.strategy.industries),
         )
     }
 
     fn build_user_message(&self) -> String {
+        let scope = match (
+            self.strategy.watchlist.is_empty(),
+            self.strategy.industries.is_empty(),
+        ) {
+            (false, _) => format!("the watchlist {:?}", self.strategy.watchlist),
+            (true, false) => format!(
+                "stocks in the {} sector(s) — use the available tools to discover candidates",
+                self.strategy.industries.join(", ")
+            ),
+            (true, true) => "any symbols you deem appropriate".to_string(),
+        };
         format!(
-            "Current time: {}. Review my portfolio and the watchlist {:?}, then \
-             execute the trading strategy for this cycle. Apply all rules and place \
-             any warranted orders using the tools.",
+            "Current time: {}. Review my portfolio and {scope}, then execute the \
+             trading strategy for this cycle. Apply all rules and place any warranted \
+             orders using the tools.",
             Utc::now().format("%Y-%m-%d %H:%M UTC"),
-            self.strategy.watchlist,
         )
     }
 
@@ -268,6 +280,29 @@ impl TradingAgent {
             let _ = tx.send(event).await;
         }
     }
+}
+
+/// How the LLM should select trade candidates (watchlist vs. open universe).
+fn format_scope_instruction(watchlist: &[String]) -> String {
+    if watchlist.is_empty() {
+        "You may trade any symbol available through the tools.".to_string()
+    } else {
+        format!("Only trade symbols on the watchlist: {watchlist:?}")
+    }
+}
+
+/// Extra instruction injected when the strategy targets specific industries.
+fn format_industry_instruction(industries: &[String]) -> String {
+    if industries.is_empty() {
+        return String::new();
+    }
+    format!(
+        "- Your focus sectors are: {}. \
+         Use the available search and discovery tools (e.g. search_stocks, \
+         get_sector_stocks, or similar) to identify strong candidates within \
+         these industries before selecting which to trade.\n",
+        industries.join(", ")
+    )
 }
 
 /// Format the buy filters into a one-line human summary.

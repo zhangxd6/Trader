@@ -87,7 +87,8 @@ pub enum AppStatus {
 
 /// The full TUI state, mutated as [`AppEvent`](super::AppEvent)s arrive.
 pub struct App {
-    pub strategy: StrategyConfig,
+    pub strategies: Vec<StrategyConfig>,
+    pub active_strategy_idx: usize,
     pub mode: RunMode,
     pub status: AppStatus,
     pub portfolio: Option<PortfolioSnapshot>,
@@ -101,9 +102,10 @@ pub struct App {
 const MAX_LOGS: usize = 20;
 
 impl App {
-    pub fn new(strategy: StrategyConfig, mode: RunMode) -> Self {
+    pub fn new(strategies: Vec<StrategyConfig>, mode: RunMode) -> Self {
         Self {
-            strategy,
+            strategies,
+            active_strategy_idx: 0,
             mode,
             status: AppStatus::Running,
             portfolio: None,
