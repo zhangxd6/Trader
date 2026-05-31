@@ -1,0 +1,35 @@
+services:
+  trader:
+    build: .
+    image: trader:latest
+    restart: unless-stopped
+    env_file: .env                    # ROBINHOOD_MCP_TOKEN, OPENAI_API_KEY, etc.
+    volumes:
+      - ./config:/app/config:ro       # strategy.yaml (read-only)
+      - ./logs:/app/logs              # audit trail
+      - ./simulation:/app/simulation  # virtual portfolio state
+    command: run                      # headless scheduled loop
+
+  # One-shot cycle — run with: docker compose run --rm trader-once
+  trader-once:
+    build: .
+    image: trader:latest
+    env_file: .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./simulation:/app/simulation
+    command: once
+    profiles: [tools]
+
+  # Simulation loop — run with: docker compose up trader-sim
+  trader-sim:
+    build: .
+    image: trader:latest
+    env_file: .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./simulation:/app/simulation
+    command: simulate
+    profiles: [tools]
