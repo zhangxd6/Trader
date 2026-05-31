@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+   "mcp": {
+    "robinhood-trading": {
+      "type": "remote",
+      "url": "https://agent.robinhood.com/mcp/trading",
+      "enabled": true
+    }
+  },
+  "instructions": [
+    "config/strategy.yaml"
+  ],
+  "snapshot": true,
+  "share": "disabled"
+}

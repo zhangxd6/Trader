@@ -15,12 +15,16 @@ use crate::tui::AppEvent;
 /// Run the trading loop forever: tick every `interval_minutes`, and on each
 /// tick run all agents sequentially if the US equity market is open.
 ///
+/// Pass `simulate = true` to skip the market-hours gate (useful for
+/// paper-trading outside regular session hours).
+///
 /// If `events` is provided, market-status, next-cycle, and per-strategy
 /// updates are forwarded to the TUI. Cycle errors are logged but never
 /// terminate the loop.
 pub async fn run_trading_loop(
     agents: Vec<Arc<TradingAgent>>,
     interval_minutes: u64,
+    simulate: bool,
     events: Option<mpsc::Sender<AppEvent>>,
 ) {
     let mut ticker = tokio::time::interval(Duration::from_secs(interval_minutes * 60));
@@ -28,7 +32,7 @@ pub async fn run_trading_loop(
 
     loop {
         ticker.tick().await;
-        let open = is_market_open(chrono::Utc::now());
+        let open = simulate || is_market_open(chrono::Utc::now());
         if let Some(tx) = &events {
             let _ = tx.send(AppEvent::MarketStatus(open)).await;
             let _ = tx

@@ -263,16 +263,18 @@ async fn drive(
                 if agents.len() == 1 { "strategy" } else { "strategies" },
                 config.scheduler.interval_minutes
             );
-            scheduler::run_trading_loop(agents, config.scheduler.interval_minutes, None).await;
+            let simulate = matches!(mode, RunMode::Simulate);
+            scheduler::run_trading_loop(agents, config.scheduler.interval_minutes, simulate, None).await;
         }
         RunStyle::Tui => {
             let app = App::new(config.strategies.clone(), mode);
             let interval = config.scheduler.interval_minutes;
+            let simulate = matches!(mode, RunMode::Simulate);
             // The scheduler loop shares the same sender so the TUI also sees
             // market-status and next-cycle updates.
             let loop_tx = events_tx.clone();
             let handle = tokio::spawn(async move {
-                scheduler::run_trading_loop(agents, interval, Some(loop_tx)).await;
+                scheduler::run_trading_loop(agents, interval, simulate, Some(loop_tx)).await;
             });
             // Drop our spare sender so the channel closes once the loop ends.
             drop(events_tx);

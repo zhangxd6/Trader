@@ -11,6 +11,51 @@ use crate::mcp::McpTool;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
+/// Strip verbose `description` fields from JSON schema properties, keeping
+/// only `type`, `enum`, and `required` so tool definitions stay compact.
+fn trim_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                if k == "description" {
+                    // Keep a short version at the top level only.
+                    let short: String = v.as_str().unwrap_or("").chars().take(60).collect();
+                    if !short.is_empty() {
+                        out.insert(k.clone(), Value::String(short));
+                    }
+                } else if k == "properties" {
+                    // Strip descriptions inside each property.
+                    if let Value::Object(props) = v {
+                        let trimmed: serde_json::Map<String, Value> = props
+                            .iter()
+                            .map(|(pk, pv)| {
+                                let pv2 = if let Value::Object(pm) = pv {
+                                    let stripped: serde_json::Map<String, Value> = pm
+                                        .iter()
+                                        .filter(|(fk, _)| *fk != "description")
+                                        .map(|(fk, fv)| (fk.clone(), trim_schema(fv)))
+                                        .collect();
+                                    Value::Object(stripped)
+                                } else {
+                                    pv.clone()
+                                };
+                                (pk.clone(), pv2)
+                            })
+                            .collect();
+                        out.insert(k.clone(), Value::Object(trimmed));
+                    }
+                } else {
+                    out.insert(k.clone(), trim_schema(v));
+                }
+            }
+            Value::Object(out)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(trim_schema).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Provider backed by any OpenAI-compatible `/chat/completions` endpoint.
 pub struct OpenAiProvider {
     http: reqwest::Client,
@@ -50,16 +95,20 @@ impl OpenAiProvider {
     }
 
     /// Convert MCP tools into OpenAI `function` tool definitions.
+    /// Descriptions are capped at 120 chars and parameter descriptions stripped
+    /// to keep token usage within free-tier limits.
     fn tool_defs(tools: &[McpTool]) -> Vec<Value> {
         tools
             .iter()
             .map(|t| {
+                let desc = t.description.chars().take(120).collect::<String>();
+                let params = trim_schema(&t.input_schema);
                 json!({
                     "type": "function",
                     "function": {
                         "name": t.name,
-                        "description": t.description,
-                        "parameters": t.input_schema,
+                        "description": desc,
+                        "parameters": params,
                     }
                 })
             })
@@ -76,22 +125,34 @@ impl OpenAiProvider {
         if !tool_defs.is_empty() {
             body["tools"] = json!(tool_defs);
             body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(false);
         }
 
-        let resp = self
-            .http
-            .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await?;
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            return Err(TraderError::Llm(format!("HTTP {status}: {text}")));
+        // Retry up to 5 times on 429; wait 60 s each time to clear the
+        // per-minute token-rate window used by Groq's free tier.
+        for attempt in 1..=5u32 {
+            let resp = self
+                .http
+                .post(format!("{}/chat/completions", self.base_url))
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send()
+                .await?;
+            let status = resp.status();
+            let text = resp.text().await?;
+
+            if status.as_u16() == 429 {
+                tracing::warn!("rate limited (attempt {attempt}/5); waiting 60 s for TPM window reset");
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
+            if !status.is_success() {
+                return Err(TraderError::Llm(format!("HTTP {status}: {text}")));
+            }
+            return serde_json::from_str(&text)
+                .map_err(|e| TraderError::LlmParse(format!("{e} (body: {text})")));
         }
-        serde_json::from_str(&text)
-            .map_err(|e| TraderError::LlmParse(format!("{e} (body: {text})")))
+        Err(TraderError::Llm("rate limit exceeded after 5 retries".into()))
     }
 }
 
