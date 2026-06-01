@@ -333,6 +333,27 @@ impl SimulationExecutor {
             portfolio_path: std::path::PathBuf::from("./simulation/portfolio.json"),
         }
     }
+
+    /// Fetch the current last-trade price for `symbol` via MCP.
+    async fn fetch_price(&self, symbol: &str) -> Option<f64> {
+        let result = self
+            .mcp
+            .call_tool("get_equity_quotes", serde_json::json!({"symbols": [symbol]}))
+            .await
+            .ok()?;
+
+        // The quotes tool wraps results in content[0].text as JSON.
+        let text = result
+            .get("content")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("text"))
+            .and_then(|t| t.as_str())?;
+        let parsed: serde_json::Value = serde_json::from_str(text).ok()?;
+        let price_str = parsed
+            .pointer("/data/results/0/quote/last_trade_price")
+            .and_then(|v| v.as_str())?;
+        price_str.parse::<f64>().ok()
+    }
 }
 
 #[async_trait]
@@ -353,16 +374,33 @@ impl ToolExecutor for SimulationExecutor {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_lowercase();
-        let quantity = extract_f64(&args, &["quantity", "qty", "shares"]).unwrap_or(1.0);
-        let price = extract_f64(&args, &["price", "limit_price", "estimated_price"])
+        let mut quantity = extract_f64(&args, &["quantity", "qty", "shares"]).unwrap_or(0.0);
+        let mut price = extract_f64(&args, &["price", "limit_price", "estimated_price"])
             .unwrap_or_else(|| extract_f64(&args, &["ask_price", "bid_price"]).unwrap_or(0.0));
 
         if symbol.is_empty() {
             return Err(TraderError::Simulation("order missing `symbol`".into()));
         }
+
+        // Market orders don't carry a price — fetch the live quote.
+        if price <= 0.0 {
+            price = self.fetch_price(&symbol).await.unwrap_or(0.0);
+        }
         if price <= 0.0 {
             return Err(TraderError::Simulation(format!(
-                "order for {symbol} has no usable price in args"
+                "order for {symbol} has no usable price in args and quote fetch failed"
+            )));
+        }
+
+        // Dollar-amount orders (e.g. dollar_amount: "120") — compute fractional qty.
+        if quantity <= 0.0 {
+            if let Some(dollars) = extract_f64(&args, &["dollar_amount", "notional", "amount_usd"]) {
+                quantity = (dollars / price * 10_000.0).round() / 10_000.0;
+            }
+        }
+        if quantity <= 0.0 {
+            return Err(TraderError::Simulation(format!(
+                "order for {symbol} has no usable quantity in args"
             )));
         }
 

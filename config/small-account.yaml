@@ -18,8 +18,12 @@ robinhood:
 llm:
   provider: openai-compatible
   api_key: "ollama"
-  model: "qwen3.5"
+  model: "qwen3.5:9b"
   base_url: "http://localhost:11434/v1"
+  # Alternatives when Groq daily limit is exhausted:
+  #   api_key: "${GROQ_API_KEY}"
+  #   model: "llama-3.3-70b-versatile"
+  #   base_url: "https://api.groq.com/openai/v1"
   temperature: 0.1     # lower temperature = more disciplined, less speculative
   max_tokens: 2048
 
