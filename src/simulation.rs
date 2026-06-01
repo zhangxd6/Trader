@@ -36,6 +36,15 @@ pub struct TradeRecord {
     pub pnl: Option<f64>,
 }
 
+/// A point-in-time portfolio value snapshot recorded after each cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueSnapshot {
+    pub timestamp: DateTime<Utc>,
+    pub total_value: f64,
+    pub cash: f64,
+    pub positions_value: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulatedPortfolio {
     pub starting_cash: f64,
@@ -43,6 +52,9 @@ pub struct SimulatedPortfolio {
     pub created_at: DateTime<Utc>,
     pub positions: HashMap<String, Position>,
     pub trade_log: Vec<TradeRecord>,
+    /// Equity curve: one snapshot per cycle (or per trade).
+    #[serde(default)]
+    pub value_history: Vec<ValueSnapshot>,
 }
 
 impl SimulatedPortfolio {
@@ -53,7 +65,143 @@ impl SimulatedPortfolio {
             created_at: Utc::now(),
             positions: HashMap::new(),
             trade_log: Vec::new(),
+            value_history: Vec::new(),
         }
+    }
+
+    /// Record a snapshot of the current portfolio value. Call this after every
+    /// cycle (or after every trade) to build the equity curve. Uses cost-basis
+    /// for open positions — no live price needed.
+    pub fn record_snapshot(&mut self) {
+        let positions_value = self.market_value(|_| None);
+        self.value_history.push(ValueSnapshot {
+            timestamp: Utc::now(),
+            total_value: self.cash_usd + positions_value,
+            cash: self.cash_usd,
+            positions_value,
+        });
+    }
+
+    /// Export the equity curve to a CSV file for external plotting (Excel,
+    /// Python, etc.).
+    pub fn export_csv(&self, path: &Path) -> Result<()> {
+        let mut out = String::from("timestamp,total_value,cash,positions_value,return_pct\n");
+        for s in &self.value_history {
+            let ret = if self.starting_cash > 0.0 {
+                (s.total_value - self.starting_cash) / self.starting_cash * 100.0
+            } else {
+                0.0
+            };
+            out.push_str(&format!(
+                "{},{:.2},{:.2},{:.2},{:.4}\n",
+                s.timestamp.format("%Y-%m-%dT%H:%M:%S"),
+                s.total_value,
+                s.cash,
+                s.positions_value,
+                ret,
+            ));
+        }
+        std::fs::write(path, out)?;
+        Ok(())
+    }
+
+    /// Render a multi-row ASCII equity curve to a String.
+    /// `width` is the plot area width in characters (default 60).
+    pub fn render_chart(&self, width: usize) -> String {
+        let height: usize = 10;
+
+        if self.value_history.len() < 2 {
+            return "  No history yet — run at least two simulation cycles first.\n".to_string();
+        }
+
+        let values: Vec<f64> = self.value_history.iter().map(|s| s.total_value).collect();
+        let n = values.len();
+        let min_v = values.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_v = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let range = (max_v - min_v).max(1.0);
+
+        // Map each data-point index to a grid column and row.
+        let to_col = |i: usize| -> usize {
+            if n == 1 { 0 } else {
+                (i * (width - 1) / (n - 1)).min(width - 1)
+            }
+        };
+        let to_row = |v: f64| -> usize {
+            let norm = (v - min_v) / range;
+            (height - 1).saturating_sub((norm * (height - 1) as f64) as usize)
+        };
+
+        // col_y[x] = row index for that column (last writer wins on collision).
+        let mut col_y: Vec<Option<usize>> = vec![None; width];
+        for (i, &v) in values.iter().enumerate() {
+            col_y[to_col(i)] = Some(to_row(v));
+        }
+
+        // Build character grid.
+        let mut grid: Vec<Vec<char>> = vec![vec![' '; width]; height];
+
+        // Draw each plotted point and horizontal connectors at the same row.
+        let mut last_col: Option<(usize, usize)> = None; // (col, row)
+        for x in 0..width {
+            if let Some(y) = col_y[x] {
+                // Fill horizontal run from last point if same row.
+                if let Some((lx, ly)) = last_col {
+                    if ly == y {
+                        for cx in lx..x {
+                            grid[y][cx] = '─';
+                        }
+                    }
+                }
+                grid[y][x] = '●';
+                last_col = Some((x, y));
+            }
+        }
+
+        // Y-axis label width: room for "$10,000" style labels.
+        let y_label = |row: usize| -> String {
+            let v = max_v - (row as f64 / (height - 1) as f64) * range;
+            if row == 0 || row == height / 2 || row == height - 1 {
+                format!("${:>7.0}", v)
+            } else {
+                "        ".to_string()
+            }
+        };
+
+        let mut lines: Vec<String> = Vec::with_capacity(height + 4);
+
+        for row in 0..height {
+            let axis = if row == height - 1 { '┼' } else { '┤' };
+            let plot: String = grid[row].iter().collect();
+            lines.push(format!("{} {} {}", y_label(row), axis, plot));
+        }
+
+        // X-axis bar.
+        lines.push(format!("         └─{}", "─".repeat(width)));
+
+        // Date labels.
+        let first_ts = self.value_history.first()
+            .map(|s| s.timestamp.format("%m/%d %H:%M").to_string())
+            .unwrap_or_default();
+        let last_ts = self.value_history.last()
+            .map(|s| s.timestamp.format("%m/%d %H:%M").to_string())
+            .unwrap_or_default();
+        let gap = width.saturating_sub(first_ts.len() + last_ts.len());
+        lines.push(format!("           {}{}{}", first_ts, " ".repeat(gap), last_ts));
+
+        // Summary line.
+        let current = values.last().copied().unwrap_or(self.starting_cash);
+        let ret_pct = (current - self.starting_cash) / self.starting_cash * 100.0;
+        let pnl = current - self.starting_cash;
+        lines.push(format!(
+            "\n  {} snapshots | {} trades | P&L: ${:+.2} ({:+.1}%) | current: ${:.2}",
+            self.value_history.len(),
+            self.trade_log.len(),
+            pnl,
+            ret_pct,
+            current,
+        ));
+
+        lines.join("\n")
     }
 
     /// Load from disk or create a fresh portfolio if none exists.
@@ -228,6 +376,7 @@ impl ToolExecutor for SimulationExecutor {
                 )))
             }
         }
+        p.record_snapshot();
         p.save(&self.portfolio_path)?;
 
         Ok(json!({

@@ -50,6 +50,12 @@ pub enum Command {
         /// Reset the virtual portfolio to the starting cash and exit.
         #[arg(long)]
         reset: bool,
+        /// Print the equity curve as an ASCII chart (requires --status).
+        #[arg(long)]
+        chart: bool,
+        /// Export the equity-curve history to a CSV file for external plotting.
+        #[arg(long, value_name = "FILE")]
+        csv: Option<PathBuf>,
     },
     /// List the tools advertised by the Robinhood MCP server.
     Tools,
@@ -59,4 +65,17 @@ pub enum Command {
     Quotes,
     /// Verify the MCP connection and exit.
     Auth,
+    /// Gather news and web context for one or more symbols and produce a
+    /// research report via the LLM.
+    Research {
+        /// Symbols to analyze (e.g. AAPL TSLA NVDA).
+        #[arg(value_name = "SYMBOL")]
+        symbols: Vec<String>,
+        /// Free-form search query for broader market context.
+        #[arg(long, short)]
+        query: Option<String>,
+        /// Number of news headlines to fetch per symbol.
+        #[arg(long, default_value = "5")]
+        news_items: usize,
+    },
 }

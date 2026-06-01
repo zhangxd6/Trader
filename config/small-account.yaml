@@ -1,0 +1,93 @@
+# Small-account growth strategy — $300 starting capital, ~10% monthly target.
+#
+# Run with:  trader --config config/small-account.yaml simulate
+#            trader --config config/small-account.yaml once --dry-run
+#
+# Core philosophy:
+#   Capital is too thin for diversification. Win with 2-3 high-conviction
+#   swing trades per month. A 10% gain on a $130 position = $13; two of
+#   those plus one smaller win covers the $30 monthly target. Protect the
+#   account: a 5% stop on $130 = $6.50 loss — survivable. A blown account
+#   is not. The PDT rule (3 day-trades per rolling 5 days) does NOT apply
+#   on a cash account; Robinhood settles equity trades T+1.
+
+robinhood:
+  mcp_url: "https://agent.robinhood.com/mcp/trading"
+  api_token: "${ROBINHOOD_MCP_TOKEN}"
+
+llm:
+  provider: openai-compatible
+  api_key: "ollama"
+  model: "qwen3.5"
+  base_url: "http://localhost:11434/v1"
+  temperature: 0.1     # lower temperature = more disciplined, less speculative
+  max_tokens: 2048
+
+strategy:
+  name: "Nano AI Swing"
+  description: >
+    Concentrated swing trading on AI infrastructure leaders using fractional
+    shares. Account size is $300; target is 10% per month (~$30).
+    Enter only on confirmed pullbacks from recent highs. Exit fast at
+    take-profit — do not hold through reversals hoping for more. Capital
+    preservation is the first priority; a losing month at -5% is acceptable,
+    a blown account is not. Use fractional shares for precise sizing.
+
+  # Tight watchlist: liquid AI infrastructure names with 2–4% daily range.
+  # TSM and ANET are Tier-1 resilient plays; NVDA and MRVL provide momentum.
+  # AMD added as a higher-beta swing alternative.
+  watchlist: [NVDA, AMD, ANET, TSM, MRVL]
+
+  industries: [AI, Semiconductors, Data Centers, Networking]
+
+  structured:
+    stop_loss_pct:    5.0    # Max loss per position: ~$6.50 on a $130 trade
+    take_profit_pct: 12.0    # Target per swing: ~$15.60 on $130 → covers 2 stops
+    max_positions:    2      # Never hold more than 2 names; capital is scarce
+    min_confidence:   0.82   # High bar — skip marginal setups
+    buy_filters:
+      max_price_vs_52w_high_pct: 88.0  # Only buy if ≥12% below 52-week high
+      min_volume_ratio: 1.10           # Require above-average volume on entry day
+
+  rules:
+    - "POSITION SIZE: Use fractional shares. Allocate $120–$130 per position,
+       never more. Keep at least $50 in cash as a reserve at all times."
+    - "ENTRY: Only open a position when the stock has pulled back ≥5% from its
+       3–5 day high AND is showing a reversal signal (volume spike, bounce off
+       support, or a positive catalyst). Do not chase."
+    - "EXIT DISCIPLINE: Sell the full position when take-profit triggers.
+       Do not hold through earnings unless you entered before the announcement.
+       A bird in hand — lock in the gain."
+    - "STOP ADHERENCE: Honor the 5% stop-loss without exception. A small loss
+       now preserves capital for the next setup. Never average down."
+    - "NAME SELECTION: Prefer TSM and ANET (stronger fundamentals, clearer
+       support levels). Use NVDA and AMD only when their pullback is ≥7%
+       and broad market is not in a confirmed downtrend."
+    - "FREQUENCY: Target 2–3 round-trip trades per month. Overtrading on a
+       $300 account compounds losses faster than gains."
+    - "MARKET CONTEXT: Check SPY direction first. If SPY is below its 20-day
+       moving average, only trade TSM (most defensive). No buys if VIX > 25."
+    - "AFTER TWO CONSECUTIVE LOSSES: Stop trading for 5 calendar days.
+       Reassess market conditions before resuming."
+
+  interval_minutes: 60   # Check every hour — swing trades don't need 30-min cadence
+
+risk:
+  dry_run: true           # Set to false only when ready for real money
+  max_trade_usd: 130.0    # Hard cap: $130 per order (43% of $300 account)
+  max_position_pct: 0.45  # Allow up to 45% in one name (concentrated by design)
+  max_daily_trades: 2     # Never more than 2 orders in a single day
+  min_cash_reserve_pct: 0.18  # Always keep ~$54 minimum cash floor
+  allow_buys: true
+  allow_sells: true
+
+scheduler:
+  interval_minutes: 60
+
+audit:
+  log_dir: "./logs"
+  log_file: "small-account-audit.jsonl"
+
+simulation:
+  starting_cash: 300.0
+  portfolio_path: "./simulation/small-account-portfolio.json"

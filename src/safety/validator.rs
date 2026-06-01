@@ -294,6 +294,7 @@ mod tests {
                 buy_filters: BuyFilters::default(),
             },
             rules: vec![],
+            interval_minutes: None,
         }
     }
 

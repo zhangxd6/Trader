@@ -74,6 +74,10 @@ impl TradingAgent {
         }
     }
 
+    pub fn strategy_name(&self) -> &str {
+        &self.strategy.name
+    }
+
     /// Run one decision cycle: prompt the LLM, let it call tools through the
     /// safety layer, then audit and report the result.
     pub async fn run_cycle(&self) -> Result<()> {
@@ -126,6 +130,11 @@ impl TradingAgent {
         )
         .await;
         self.send(AppEvent::CycleComplete { executed, held }).await;
+
+        // Record an equity-curve snapshot after every cycle.
+        if let Some(handle) = &self.sim_portfolio {
+            handle.write().await.record_snapshot();
+        }
 
         // Refresh the TUI portfolio panel.
         if let Some(snapshot) = self.portfolio_snapshot().await {

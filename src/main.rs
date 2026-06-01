@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod llm;
 mod mcp;
+mod research;
 mod safety;
 mod scheduler;
 mod simulation;
@@ -23,6 +24,7 @@ use tracing_subscriber::EnvFilter;
 use crate::audit::AuditLogger;
 use crate::agent::{LiveExecutor, TradingAgent};
 use crate::cli::{Cli, Command};
+use crate::research::ResearchExecutor;
 use crate::config::AppConfig;
 use crate::llm::ToolExecutor;
 use crate::mcp::{McpTool, RobinhoodMcpClient};
@@ -44,6 +46,9 @@ async fn main() -> Result<()> {
         Command::Tools => cmd_tools(&config).await,
         Command::Portfolio => cmd_portfolio(&config).await,
         Command::Quotes => cmd_quotes(&config).await,
+        Command::Research { symbols, query, news_items } => {
+            cmd_research(&config, symbols.clone(), query.clone(), *news_items).await
+        }
         Command::Once => run_live(&config, cli.dry_run, RunStyle::Once).await,
         Command::Run { tui } => {
             let style = if *tui { RunStyle::Tui } else { RunStyle::Loop };
@@ -55,8 +60,10 @@ async fn main() -> Result<()> {
             tui,
             status,
             reset,
+            chart,
+            csv,
         } => {
-            cmd_simulate(&config, *once, *tui, *status, *reset).await
+            cmd_simulate(&config, *once, *tui, *status, *reset, *chart, csv.as_deref()).await
         }
     }
 }
@@ -165,6 +172,8 @@ async fn cmd_simulate(
     tui: bool,
     status: bool,
     reset: bool,
+    chart: bool,
+    csv: Option<&std::path::Path>,
 ) -> Result<()> {
     let path = std::path::Path::new(&config.simulation.portfolio_path);
 
@@ -178,9 +187,17 @@ async fn cmd_simulate(
         return Ok(());
     }
 
+    if let Some(out) = csv {
+        let p = SimulatedPortfolio::load_or_init(path, config.simulation.starting_cash)?;
+        p.export_csv(out)
+            .with_context(|| format!("writing CSV to {}", out.display()))?;
+        println!("Exported {} snapshots to {}", p.value_history.len(), out.display());
+        return Ok(());
+    }
+
     if status {
         let p = SimulatedPortfolio::load_or_init(path, config.simulation.starting_cash)?;
-        print_sim_status(&p);
+        print_sim_status(&p, chart);
         return Ok(());
     }
 
@@ -224,68 +241,95 @@ async fn drive(
     let with_tui = matches!(style, RunStyle::Tui);
     let agent_events = if with_tui { Some(events_tx.clone()) } else { None };
 
-    // One agent per strategy, each with its own SafetyValidator (own watchlist).
-    let agents: Vec<Arc<TradingAgent>> = config
+    let simulate = matches!(mode, RunMode::Simulate);
+    let default_interval = config.scheduler.interval_minutes;
+
+    // Wrap the inner executor with research tools (news + web search).
+    let research_inner: Arc<dyn ToolExecutor> = Arc::new(ResearchExecutor::new(
+        inner.clone(),
+        config.research.brave_api_key.clone(),
+    ));
+    // Extend the tool list so the LLM knows about web_search and get_stock_news.
+    let mut all_tools = tools;
+    all_tools.extend(research::research_tools());
+
+    // One agent per strategy, each with its own SafetyValidator and interval.
+    let agents: Vec<(Arc<TradingAgent>, u64)> = config
         .strategies
         .iter()
         .map(|strategy| {
+            let interval = strategy.interval_minutes.unwrap_or(default_interval);
             let validator: Arc<dyn ToolExecutor> = Arc::new(SafetyValidator::new(
-                inner.clone(),
+                research_inner.clone(),
                 config.risk.clone(),
                 strategy,
             ));
-            Arc::new(TradingAgent::new(
+            let agent = Arc::new(TradingAgent::new(
                 llm.clone(),
                 validator,
-                tools.clone(),
+                all_tools.clone(),
                 strategy.clone(),
                 mode,
                 dry_run,
                 audit.clone(),
                 agent_events.clone(),
                 sim_portfolio.clone(),
-            ))
+            ));
+            (agent, interval)
         })
         .collect();
 
     match style {
         RunStyle::Once => {
-            for agent in &agents {
+            for (agent, _) in &agents {
                 agent.run_cycle().await?;
             }
             println!("Cycle complete. See {} for the audit trail.", config.audit.log_file);
         }
         RunStyle::Loop => {
             println!(
-                "Starting trading loop ({}, {} {}, every {} min). Ctrl-C to stop.",
+                "Starting trading loop ({}, {} {}). Ctrl-C to stop.",
                 mode.label(),
                 agents.len(),
                 if agents.len() == 1 { "strategy" } else { "strategies" },
-                config.scheduler.interval_minutes
             );
-            let simulate = matches!(mode, RunMode::Simulate);
-            scheduler::run_trading_loop(agents, config.scheduler.interval_minutes, simulate, None).await;
+            for (agent, interval) in &agents {
+                println!("  • {} — every {} min", agent.strategy_name(), interval);
+            }
+            // Spawn one independent loop per strategy.
+            let handles: Vec<_> = agents
+                .into_iter()
+                .map(|(agent, interval)| {
+                    tokio::spawn(async move {
+                        scheduler::run_trading_loop(vec![agent], interval, simulate, None).await;
+                    })
+                })
+                .collect();
+            for h in handles {
+                let _ = h.await;
+            }
         }
         RunStyle::Tui => {
             let app = App::new(config.strategies.clone(), mode);
-            let interval = config.scheduler.interval_minutes;
-            let simulate = matches!(mode, RunMode::Simulate);
-            // The scheduler loop shares the same sender so the TUI also sees
-            // market-status and next-cycle updates.
-            let loop_tx = events_tx.clone();
-            let handle = tokio::spawn(async move {
-                scheduler::run_trading_loop(agents, interval, simulate, Some(loop_tx)).await;
-            });
-            // Drop our spare sender so the channel closes once the loop ends.
+            // Spawn one independent loop per strategy; all share the event sender.
+            let mut loop_handles = Vec::new();
+            for (agent, interval) in agents {
+                let tx = events_tx.clone();
+                loop_handles.push(tokio::spawn(async move {
+                    scheduler::run_trading_loop(vec![agent], interval, simulate, Some(tx)).await;
+                }));
+            }
             drop(events_tx);
             tui::run_tui(app, events_rx).await?;
-            handle.abort();
+            for h in loop_handles {
+                h.abort();
+            }
         }
     }
     Ok(())
 }
 
-fn print_sim_status(p: &SimulatedPortfolio) {
+fn print_sim_status(p: &SimulatedPortfolio, show_chart: bool) {
     let total = p.cash_usd + p.market_value(|_| None);
     let ret = if p.starting_cash > 0.0 {
         (total - p.starting_cash) / p.starting_cash * 100.0
@@ -304,7 +348,16 @@ fn print_sim_status(p: &SimulatedPortfolio) {
     }
     println!("Total (cost-basis): ${total:.2}");
     println!("Return:     {ret:+.2}% vs ${:.2} start", p.starting_cash);
+
+    if show_chart {
+        println!("\n=== Equity Curve ===");
+        println!("{}", p.render_chart(60));
+    }
+
     println!("\nRecent trades:");
+    if p.trade_log.is_empty() {
+        println!("  (none yet)");
+    }
     for t in p.trade_log.iter().rev().take(10) {
         let pnl = t
             .pnl
@@ -320,6 +373,75 @@ fn print_sim_status(p: &SimulatedPortfolio) {
             pnl
         );
     }
+}
+
+/// Gather news + web context for the given symbols and ask the LLM to produce
+/// an actionable research report. Uses a read-only executor chain (no safety
+/// validator) since no orders are placed.
+async fn cmd_research(
+    config: &AppConfig,
+    symbols: Vec<String>,
+    query: Option<String>,
+    news_items: usize,
+) -> Result<()> {
+    let mcp = connect_mcp(config).await?;
+    let mcp_tools = mcp.list_tools().await?;
+
+    let live: Arc<dyn ToolExecutor> = Arc::new(LiveExecutor::new(mcp));
+    let executor: Arc<dyn ToolExecutor> = Arc::new(ResearchExecutor::new(
+        live,
+        config.research.brave_api_key.clone(),
+    ));
+
+    let mut tools = mcp_tools;
+    tools.extend(research::research_tools());
+
+    let llm = llm::build_provider(&config.llm);
+
+    let symbols_upper: Vec<String> = symbols.iter().map(|s| s.to_uppercase()).collect();
+    let symbols_list = if symbols_upper.is_empty() {
+        "any relevant stocks".to_string()
+    } else {
+        symbols_upper.join(", ")
+    };
+    let search_query = query.unwrap_or_else(|| {
+        if symbols_upper.is_empty() {
+            "stock market news today".to_string()
+        } else {
+            format!("{} stock news analysis outlook", symbols_upper.join(" "))
+        }
+    });
+
+    let system_prompt = "You are a financial research analyst. Gather information using the \
+        available tools, then produce a concise, actionable research report. \
+        Focus on facts and clear trading implications. Do not place any orders."
+        .to_string();
+
+    let user_message = format!(
+        "Research these symbols: [{symbols_list}]. \
+         Search context: \"{search_query}\".\n\n\
+         Steps:\n\
+         1. For each symbol, call `get_stock_news` (max_items: {news_items}).\n\
+         2. Call `web_search` with \"{search_query}\" (max_results: 5).\n\
+         3. Fetch current quotes via the MCP quote tool.\n\
+         4. Write a 300-500 word report covering: price action, news sentiment, \
+         key themes, trading implication (bullish/bearish/neutral), risks and \
+         upcoming catalysts."
+    );
+
+    println!("Researching: {symbols_list}");
+    println!("Query: {search_query}\n");
+
+    let result = llm
+        .run_agent_loop(&system_prompt, &user_message, &tools, executor.as_ref())
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    println!("═══════════════════ Research Report ═══════════════════\n");
+    println!("{}", result.final_response);
+    println!("\n═══════════════════════════════════════════════════════");
+    println!("({} tool calls, {} iterations)", result.tool_calls_made.len(), result.iterations);
+    Ok(())
 }
 
 /// Find a tool whose name contains any of the keywords.

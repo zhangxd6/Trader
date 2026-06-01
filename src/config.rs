@@ -21,6 +21,8 @@ pub struct AppConfig {
     pub audit: AuditConfig,
     #[serde(default)]
     pub simulation: SimulationConfig,
+    #[serde(default)]
+    pub research: ResearchConfig,
 }
 
 /// Robinhood agentic-trading MCP connection settings.
@@ -106,6 +108,9 @@ pub struct StrategyConfig {
     pub structured: StructuredRules,
     #[serde(default)]
     pub rules: Vec<String>,
+    /// Override the global scheduler interval for this strategy (minutes).
+    /// Falls back to `scheduler.interval_minutes` when omitted.
+    pub interval_minutes: Option<u64>,
 }
 
 /// Rust-enforced numeric thresholds.
@@ -230,6 +235,15 @@ fn default_starting_cash() -> f64 {
 
 fn default_sim_path() -> String {
     "./simulation/portfolio.json".to_string()
+}
+
+/// Optional research/web-search configuration.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ResearchConfig {
+    /// Brave Search API key for web search. When absent, falls back to the
+    /// DuckDuckGo Instant Answer API (no key required).
+    /// Get a free key at https://api.search.brave.com
+    pub brave_api_key: Option<String>,
 }
 
 /// If the YAML has a top-level `strategy:` key (singular) but no `strategies:`
