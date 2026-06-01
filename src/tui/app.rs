@@ -97,6 +97,8 @@ pub struct App {
     pub next_cycle: Option<DateTime<Utc>>,
     pub market_open: bool,
     pub should_quit: bool,
+    /// Latest reasoning text from the LLM (why it traded or held).
+    pub latest_reasoning: Option<String>,
 }
 
 const MAX_LOGS: usize = 20;
@@ -114,6 +116,7 @@ impl App {
             next_cycle: None,
             market_open: false,
             should_quit: false,
+            latest_reasoning: None,
         }
     }
 

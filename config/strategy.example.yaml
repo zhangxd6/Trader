@@ -8,20 +8,27 @@ robinhood:
   api_token: "${ROBINHOOD_MCP_TOKEN}"
 
 llm:
-  provider: anthropic
-  api_key: "${ANTHROPIC_API_KEY}"
-  model: "claude-sonnet-4-6"
+  # Default: local Ollama (free, no rate limits). Install: https://ollama.com
+  # Then pull a model: ollama pull qwen2.5:14b
+  provider: openai-compatible
+  api_key: "ollama"
+  model: "qwen2.5:14b"
+  base_url: "http://localhost:11434/v1"
   temperature: 0.2
   max_tokens: 2048
-  # Other supported providers:
-  #   provider: openai
-  #   api_key: "${OPENAI_API_KEY}"
-  #   model: "gpt-4o"
-  #
-  #   provider: openai-compatible   # Groq, Ollama, Azure, Together, ...
+  # Cloud alternatives:
+  #   provider: openai-compatible   # Groq free tier
   #   api_key: "${GROQ_API_KEY}"
   #   model: "llama-3.3-70b-versatile"
   #   base_url: "https://api.groq.com/openai/v1"
+  #
+  #   provider: anthropic
+  #   api_key: "${ANTHROPIC_API_KEY}"
+  #   model: "claude-sonnet-4-6"
+  #
+  #   provider: openai
+  #   api_key: "${OPENAI_API_KEY}"
+  #   model: "gpt-4o"
   #
   #   provider: anthropic-compatible  # custom Claude proxy / gateway
   #   api_key: "${PROXY_API_KEY}"

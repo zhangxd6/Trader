@@ -22,6 +22,8 @@ pub enum AppEvent {
     Log(LogEntry),
     CycleStarted,
     CycleComplete { executed: usize, held: usize },
+    /// LLM's final reasoning text for the cycle (why it traded or held).
+    Reasoning(String),
     NextCycle(DateTime<Utc>),
     MarketStatus(bool),
     StrategyActive(usize),
@@ -45,6 +47,9 @@ impl App {
                     level: LogLevel::Info,
                     message: format!("cycle complete: {executed} placed, {held} held"),
                 });
+            }
+            AppEvent::Reasoning(text) => {
+                self.latest_reasoning = Some(text);
             }
             AppEvent::NextCycle(t) => self.next_cycle = Some(t),
             AppEvent::MarketStatus(open) => self.market_open = open,

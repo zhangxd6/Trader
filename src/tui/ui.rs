@@ -12,7 +12,7 @@ use crate::tui::app::{App, AppStatus, LogLevel, RunMode};
 pub fn render(f: &mut Frame, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
         .split(f.area());
 
     let top = Layout::default()
@@ -20,9 +20,15 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
         .split(outer[0]);
 
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(outer[1]);
+
     render_strategy(f, app, top[0]);
     render_portfolio(f, app, top[1]);
-    render_logs(f, app, outer[1]);
+    render_reasoning(f, app, bottom[0]);
+    render_logs(f, app, bottom[1]);
 }
 
 fn render_strategy(f: &mut Frame, app: &App, area: Rect) {
@@ -171,6 +177,49 @@ fn render_portfolio(f: &mut Frame, app: &App, area: Rect) {
         )
         .block(Block::default().borders(Borders::ALL).title(" Positions "));
     f.render_widget(table, chunks[1]);
+}
+
+fn render_reasoning(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Latest Reasoning ");
+
+    let inner_width = area.width.saturating_sub(2) as usize;
+
+    let content = match &app.latest_reasoning {
+        Some(text) => {
+            let mut lines: Vec<Line> = Vec::new();
+            for raw_line in text.lines() {
+                if raw_line.is_empty() {
+                    lines.push(Line::from(""));
+                    continue;
+                }
+                // Word-wrap each line to fit the panel width.
+                let mut current = String::new();
+                for word in raw_line.split_whitespace() {
+                    if current.is_empty() {
+                        current.push_str(word);
+                    } else if current.len() + 1 + word.len() <= inner_width {
+                        current.push(' ');
+                        current.push_str(word);
+                    } else {
+                        lines.push(Line::from(current.clone()));
+                        current = word.to_string();
+                    }
+                }
+                if !current.is_empty() {
+                    lines.push(Line::from(current));
+                }
+            }
+            lines
+        }
+        None => vec![Line::from(Span::styled(
+            "awaiting first cycle...",
+            Style::default().fg(Color::DarkGray),
+        ))],
+    };
+
+    f.render_widget(Paragraph::new(content).block(block), area);
 }
 
 fn render_logs(f: &mut Frame, app: &App, area: Rect) {

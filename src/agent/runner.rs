@@ -149,6 +149,14 @@ impl TradingAgent {
         if !result.final_response.is_empty() {
             self.emit(LogLevel::Llm, truncate(&result.final_response, 120))
                 .await;
+            // Send full reasoning to TUI panel, or print to stdout in headless mode.
+            if self.events.is_some() {
+                self.send(AppEvent::Reasoning(result.final_response.clone())).await;
+            } else {
+                println!("\n─── REASONING ───────────────────────────────────────");
+                println!("{}", result.final_response);
+                println!("─────────────────────────────────────────────────────\n");
+            }
         }
 
         Ok(())
