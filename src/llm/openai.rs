@@ -192,7 +192,9 @@ impl LlmProvider for OpenAiProvider {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                return Ok(acc.finish(final_response, iteration));
+                // Append the final assistant message so the conversation is complete.
+                messages.push(message.clone());
+                return Ok(acc.finish(final_response, iteration, messages));
             };
 
             // Echo the assistant's tool-call message back into the history.

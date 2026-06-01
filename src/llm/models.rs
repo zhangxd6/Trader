@@ -39,4 +39,7 @@ pub struct AgentLoopResult {
     pub orders_attempted: Vec<OrderAttempt>,
     /// Number of round-trips made to the LLM.
     pub iterations: u32,
+    /// Full turn-by-turn conversation: system prompt, user message, and every
+    /// assistant + tool exchange in chronological order.
+    pub conversation: Vec<serde_json::Value>,
 }

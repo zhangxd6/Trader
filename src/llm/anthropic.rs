@@ -140,7 +140,11 @@ impl LlmProvider for AnthropicProvider {
             }
 
             if stop_reason != "tool_use" || tool_uses.is_empty() {
-                return Ok(acc.finish(text_out, iteration));
+                // Prepend the system prompt so the saved conversation is self-contained.
+                let mut conv = vec![json!({ "role": "system", "content": system_prompt })];
+                conv.extend(messages.clone());
+                conv.push(json!({ "role": "assistant", "content": &content }));
+                return Ok(acc.finish(text_out, iteration, conv));
             }
 
             // Record the assistant turn verbatim, then answer each tool_use.

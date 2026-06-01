@@ -12,6 +12,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use serde_json::Value;
+
 use crate::error::{Result, TraderError};
 use crate::llm::{OrderAttempt, ToolCallRecord};
 
@@ -23,10 +25,15 @@ pub struct AuditEntry {
     pub strategy_name: String,
     pub mode: String,
     pub dry_run: bool,
+    pub system_prompt: String,
+    pub user_message: String,
     pub final_response: String,
     pub iterations: u32,
     pub tool_calls: Vec<ToolCallRecord>,
     pub orders_attempted: Vec<OrderAttempt>,
+    /// Full turn-by-turn conversation. `None` when `full_conversation` is disabled in config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<Vec<Value>>,
 }
 
 /// Serialises audit entries to a JSONL file.

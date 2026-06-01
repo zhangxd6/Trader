@@ -28,12 +28,18 @@ impl ToolAccumulator {
     }
 
     /// Finalise into an [`AgentLoopResult`].
-    pub fn finish(self, final_response: String, iterations: u32) -> AgentLoopResult {
+    pub fn finish(
+        self,
+        final_response: String,
+        iterations: u32,
+        conversation: Vec<serde_json::Value>,
+    ) -> AgentLoopResult {
         AgentLoopResult {
             final_response,
             tool_calls_made: self.tool_calls,
             orders_attempted: self.orders,
             iterations,
+            conversation,
         }
     }
 }

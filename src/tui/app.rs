@@ -85,6 +85,14 @@ pub enum AppStatus {
     Error(String),
 }
 
+/// Which scrollable panel currently has keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedPanel {
+    Strategy,
+    Reasoning,
+    Logs,
+}
+
 /// The full TUI state, mutated as [`AppEvent`](super::AppEvent)s arrive.
 pub struct App {
     pub strategies: Vec<StrategyConfig>,
@@ -99,6 +107,14 @@ pub struct App {
     pub should_quit: bool,
     /// Latest reasoning text from the LLM (why it traded or held).
     pub latest_reasoning: Option<String>,
+    /// Which panel receives scroll key events.
+    pub focused_panel: FocusedPanel,
+    /// Vertical scroll offset for the Strategy panel.
+    pub strategy_scroll: u16,
+    /// Vertical scroll offset for the Reasoning panel.
+    pub reasoning_scroll: u16,
+    /// Vertical scroll offset for the Logs panel.
+    pub logs_scroll: u16,
 }
 
 const MAX_LOGS: usize = 20;
@@ -117,7 +133,35 @@ impl App {
             market_open: false,
             should_quit: false,
             latest_reasoning: None,
+            focused_panel: FocusedPanel::Reasoning,
+            strategy_scroll: 0,
+            reasoning_scroll: 0,
+            logs_scroll: 0,
         }
+    }
+
+    pub fn scroll_up(&mut self) {
+        match self.focused_panel {
+            FocusedPanel::Strategy  => self.strategy_scroll  = self.strategy_scroll.saturating_sub(1),
+            FocusedPanel::Reasoning => self.reasoning_scroll = self.reasoning_scroll.saturating_sub(1),
+            FocusedPanel::Logs      => self.logs_scroll      = self.logs_scroll.saturating_sub(1),
+        }
+    }
+
+    pub fn scroll_down(&mut self) {
+        match self.focused_panel {
+            FocusedPanel::Strategy  => self.strategy_scroll  = self.strategy_scroll.saturating_add(1),
+            FocusedPanel::Reasoning => self.reasoning_scroll = self.reasoning_scroll.saturating_add(1),
+            FocusedPanel::Logs      => self.logs_scroll      = self.logs_scroll.saturating_add(1),
+        }
+    }
+
+    pub fn cycle_focus(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::Strategy  => FocusedPanel::Reasoning,
+            FocusedPanel::Reasoning => FocusedPanel::Logs,
+            FocusedPanel::Logs      => FocusedPanel::Strategy,
+        };
     }
 
     /// Append a log line, keeping only the most recent [`MAX_LOGS`].

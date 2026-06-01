@@ -277,6 +277,7 @@ async fn drive(
                 strategy.clone(),
                 mode,
                 dry_run,
+                config.audit.full_conversation,
                 audit.clone(),
                 agent_events.clone(),
                 sim_portfolio.clone(),

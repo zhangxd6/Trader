@@ -96,6 +96,9 @@ pub async fn run_tui(mut app: App, mut rx: mpsc::Receiver<AppEvent>) -> io::Resu
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Char('p') => app.toggle_pause(),
+                            KeyCode::Tab => app.cycle_focus(),
+                            KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
+                            KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
                             _ => {}
                         }
                     }

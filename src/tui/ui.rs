@@ -3,10 +3,10 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 
-use crate::tui::app::{App, AppStatus, LogLevel, RunMode};
+use crate::tui::app::{App, AppStatus, FocusedPanel, LogLevel, RunMode};
 
 /// Render the full UI for one frame.
 pub fn render(f: &mut Frame, app: &App) {
@@ -89,17 +89,34 @@ fn render_strategy(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    let focused = app.focused_panel == FocusedPanel::Strategy;
     let title = if app.strategies.len() > 1 {
         format!(
-            " Strategy {}/{} ",
+            " Strategy {}/{}{} ",
             app.active_strategy_idx + 1,
-            app.strategies.len()
+            app.strategies.len(),
+            if focused { " ▲▼" } else { "" },
         )
+    } else if focused {
+        " Strategy ▲▼ ".to_string()
     } else {
         " Strategy ".to_string()
     };
-    let block = Block::default().borders(Borders::ALL).title(title);
-    f.render_widget(Paragraph::new(lines).block(block), area);
+    let border_style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(title);
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .scroll((app.strategy_scroll, 0)),
+        area,
+    );
 }
 
 fn render_portfolio(f: &mut Frame, app: &App, area: Rect) {
@@ -180,9 +197,21 @@ fn render_portfolio(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_reasoning(f: &mut Frame, app: &App, area: Rect) {
+    let focused = app.focused_panel == FocusedPanel::Reasoning;
+    let title = if focused {
+        " Latest Reasoning ▲▼ "
+    } else {
+        " Latest Reasoning "
+    };
+    let border_style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Latest Reasoning ");
+        .border_style(border_style)
+        .title(title);
 
     let inner_width = area.width.saturating_sub(2) as usize;
 
@@ -219,24 +248,45 @@ fn render_reasoning(f: &mut Frame, app: &App, area: Rect) {
         ))],
     };
 
-    f.render_widget(Paragraph::new(content).block(block), area);
+    f.render_widget(
+        Paragraph::new(content)
+            .block(block)
+            .scroll((app.reasoning_scroll, 0)),
+        area,
+    );
 }
 
 fn render_logs(f: &mut Frame, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app
+    let focused = app.focused_panel == FocusedPanel::Logs;
+    let title = if focused {
+        " Logs ▲▼   [q]quit [p]pause [tab]focus [↑↓/jk]scroll "
+    } else {
+        " Logs      [q]quit [p]pause [tab]focus [↑↓/jk]scroll "
+    };
+    let border_style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(title);
+
+    let lines: Vec<Line> = app
         .log_buffer
         .iter()
         .map(|entry| {
             let color = match entry.level {
-                LogLevel::Error => Color::Red,
-                LogLevel::Order => Color::Green,
-                LogLevel::Llm => Color::Cyan,
+                LogLevel::Error  => Color::Red,
+                LogLevel::Order  => Color::Green,
+                LogLevel::Llm    => Color::Cyan,
                 LogLevel::Safety => Color::Yellow,
-                LogLevel::Mcp => Color::Blue,
-                LogLevel::Cycle => Color::Magenta,
-                LogLevel::Info => Color::Gray,
+                LogLevel::Mcp    => Color::Blue,
+                LogLevel::Cycle  => Color::Magenta,
+                LogLevel::Info   => Color::Gray,
             };
-            let line = Line::from(vec![
+            Line::from(vec![
                 Span::styled(
                     entry.timestamp.format("%H:%M:%S ").to_string(),
                     Style::default().fg(Color::DarkGray),
@@ -246,12 +296,14 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(entry.message.clone()),
-            ]);
-            ListItem::new(line)
+            ])
         })
         .collect();
 
-    let title = " Logs (last 20)   [q] quit  [p] pause ";
-    let block = Block::default().borders(Borders::ALL).title(title);
-    f.render_widget(List::new(items).block(block), area);
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .scroll((app.logs_scroll, 0)),
+        area,
+    );
 }

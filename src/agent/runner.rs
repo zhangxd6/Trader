@@ -42,6 +42,7 @@ pub struct TradingAgent {
     strategy: StrategyConfig,
     mode: RunMode,
     dry_run: bool,
+    full_conversation: bool,
     audit: Arc<AuditLogger>,
     events: Option<mpsc::Sender<AppEvent>>,
     /// For simulation mode: the virtual portfolio, used to render the TUI.
@@ -57,6 +58,7 @@ impl TradingAgent {
         strategy: StrategyConfig,
         mode: RunMode,
         dry_run: bool,
+        full_conversation: bool,
         audit: Arc<AuditLogger>,
         events: Option<mpsc::Sender<AppEvent>>,
         sim_portfolio: Option<Arc<RwLock<SimulatedPortfolio>>>,
@@ -68,6 +70,7 @@ impl TradingAgent {
             strategy,
             mode,
             dry_run,
+            full_conversation,
             audit,
             events,
             sim_portfolio,
@@ -86,8 +89,8 @@ impl TradingAgent {
             .await;
         self.send(AppEvent::CycleStarted).await;
 
-        let system_prompt = self.build_system_prompt();
-        let user_message = self.build_user_message();
+        let system_prompt: String = self.build_system_prompt();
+        let user_message: String = self.build_user_message();
 
         self.emit(LogLevel::Llm, format!("querying {}", self.llm.name()))
             .await;
@@ -142,16 +145,24 @@ impl TradingAgent {
         }
 
         // Persist the audit entry.
+        let conversation = if self.full_conversation {
+            Some(result.conversation.clone())
+        } else {
+            None
+        };
         let entry = AuditEntry {
             cycle_id,
             timestamp: Utc::now(),
             strategy_name: self.strategy.name.clone(),
             mode: self.mode.label().to_string(),
             dry_run: self.dry_run,
+            system_prompt: system_prompt.clone(),
+            user_message: user_message.clone(),
             final_response: result.final_response.clone(),
             iterations: result.iterations,
             tool_calls: result.tool_calls_made,
             orders_attempted: result.orders_attempted,
+            conversation,
         };
         self.audit.log(&entry).await?;
 

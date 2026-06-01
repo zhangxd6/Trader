@@ -190,6 +190,11 @@ pub struct AuditConfig {
     pub log_dir: String,
     #[serde(default = "default_log_file")]
     pub log_file: String,
+    /// When true (default), each JSONL entry includes the full turn-by-turn
+    /// conversation: system prompt, user message, and every LLM ↔ tool exchange.
+    /// Set to false to write only the summary fields (smaller files).
+    #[serde(default = "default_true")]
+    pub full_conversation: bool,
 }
 
 impl Default for AuditConfig {
@@ -197,6 +202,7 @@ impl Default for AuditConfig {
         Self {
             log_dir: default_log_dir(),
             log_file: default_log_file(),
+            full_conversation: true,
         }
     }
 }
