@@ -44,7 +44,7 @@ strategy:
     stop_loss_pct:    5.0    # Max loss per position: ~$6.50 on a $130 trade
     take_profit_pct: 12.0    # Target per swing: ~$15.60 on $130 → covers 2 stops
     max_positions:    2      # Never hold more than 2 names; capital is scarce
-    min_confidence:   0.82   # High bar — skip marginal setups
+    min_confidence:   0.82   # High bar — only take high conviction trades
     buy_filters:
       max_price_vs_52w_high_pct: 88.0  # Only buy if ≥12% below 52-week high
       min_volume_ratio: 1.10           # Require above-average volume on entry day
@@ -70,7 +70,7 @@ strategy:
     - "AFTER TWO CONSECUTIVE LOSSES: Stop trading for 5 calendar days.
        Reassess market conditions before resuming."
 
-  interval_minutes: 60   # Check every hour — swing trades don't need 30-min cadence
+  interval_minutes: 15   # Check every 15 minutes
 
 risk:
   dry_run: true           # Set to false only when ready for real money
@@ -82,7 +82,7 @@ risk:
   allow_sells: true
 
 scheduler:
-  interval_minutes: 60
+  interval_minutes: 15
 
 audit:
   log_dir: "./logs"

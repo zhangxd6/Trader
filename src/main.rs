@@ -254,6 +254,12 @@ async fn drive(
     all_tools.extend(research::research_tools());
 
     // One agent per strategy, each with its own SafetyValidator and interval.
+    // Use the drive()-level dry_run flag rather than config.risk.dry_run so that
+    // simulation mode (dry_run=false) forwards orders to SimulationExecutor even
+    // when the config YAML has dry_run: true.
+    let mut effective_risk = config.risk.clone();
+    effective_risk.dry_run = dry_run;
+
     let agents: Vec<(Arc<TradingAgent>, u64)> = config
         .strategies
         .iter()
@@ -261,7 +267,7 @@ async fn drive(
             let interval = strategy.interval_minutes.unwrap_or(default_interval);
             let validator: Arc<dyn ToolExecutor> = Arc::new(SafetyValidator::new(
                 research_inner.clone(),
-                config.risk.clone(),
+                effective_risk.clone(),
                 strategy,
             ));
             let agent = Arc::new(TradingAgent::new(
