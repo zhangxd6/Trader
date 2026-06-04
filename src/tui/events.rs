@@ -12,6 +12,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
+use chrono::Local;
+
 use crate::tui::app::{App, AppStatus, LogEntry, LogLevel, PortfolioSnapshot};
 use crate::tui::ui;
 
@@ -50,6 +52,7 @@ impl App {
             }
             AppEvent::Reasoning(text) => {
                 self.latest_reasoning = Some(text);
+                self.latest_reasoning_at = Some(Local::now());
             }
             AppEvent::NextCycle(t) => self.next_cycle = Some(t),
             AppEvent::MarketStatus(open) => self.market_open = open,

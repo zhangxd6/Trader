@@ -1,5 +1,6 @@
 //! Ratatui rendering of the three-panel layout.
 
+use chrono::Local;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -166,14 +167,20 @@ fn render_portfolio(f: &mut Frame, app: &App, area: Rect) {
             p.positions
                 .iter()
                 .map(|pos| {
-                    let pnl_color = if pos.pnl_pct >= 0.0 { Color::Green } else { Color::Red };
+                    let gain_color = if pos.gain_usd >= 0.0 { Color::Green } else { Color::Red };
+                    let cost_total = pos.avg_cost * pos.quantity;
                     Row::new(vec![
                         Cell::from(pos.symbol.clone()),
-                        Cell::from(format!("{:.2}", pos.quantity)),
-                        Cell::from(format!("${:.2}", pos.price)),
+                        Cell::from(format!("{:.4}", pos.quantity)),
+                        Cell::from(format!("${:.2}", pos.avg_cost)),
+                        Cell::from(format!("${:.2}", cost_total)),
+                        Cell::from(Span::styled(
+                            format!("{:+.2}", pos.gain_usd),
+                            Style::default().fg(gain_color),
+                        )),
                         Cell::from(Span::styled(
                             format!("{:+.2}%", pos.pnl_pct),
-                            Style::default().fg(pnl_color),
+                            Style::default().fg(gain_color),
                         )),
                     ])
                 })
@@ -182,14 +189,16 @@ fn render_portfolio(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
 
     let widths = [
+        Constraint::Length(7),
         Constraint::Length(8),
+        Constraint::Length(9),
         Constraint::Length(10),
-        Constraint::Length(12),
-        Constraint::Length(10),
+        Constraint::Length(9),
+        Constraint::Length(8),
     ];
     let table = Table::new(rows, widths)
         .header(
-            Row::new(vec!["Symbol", "Qty", "Price", "P&L%"])
+            Row::new(vec!["Symbol", "Qty", "Avg Cost", "Invested", "Gain $", "Gain %"])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(Block::default().borders(Borders::ALL).title(" Positions "));
@@ -198,10 +207,14 @@ fn render_portfolio(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_reasoning(f: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == FocusedPanel::Reasoning;
+    let ts = app
+        .latest_reasoning_at
+        .map(|t| format!(" {}", t.format("%H:%M:%S")))
+        .unwrap_or_default();
     let title = if focused {
-        " Latest Reasoning ▲▼ "
+        format!(" Latest Reasoning{ts} ▲▼ ")
     } else {
-        " Latest Reasoning "
+        format!(" Latest Reasoning{ts} ")
     };
     let border_style = if focused {
         Style::default().fg(Color::Cyan)
@@ -259,9 +272,9 @@ fn render_reasoning(f: &mut Frame, app: &App, area: Rect) {
 fn render_logs(f: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == FocusedPanel::Logs;
     let title = if focused {
-        " Logs ▲▼   [q]quit [p]pause [tab]focus [↑↓/jk]scroll "
+        " Logs ▲▼  [q]quit [p]pause [tab]focus [↑↓/jk]scroll "
     } else {
-        " Logs      [q]quit [p]pause [tab]focus [↑↓/jk]scroll "
+        " Logs     [q]quit [p]pause [tab]focus [↑↓/jk]scroll "
     };
     let border_style = if focused {
         Style::default().fg(Color::Cyan)
@@ -288,7 +301,7 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
             };
             Line::from(vec![
                 Span::styled(
-                    entry.timestamp.format("%H:%M:%S ").to_string(),
+                    entry.timestamp.with_timezone(&Local).format("%H:%M:%S ").to_string(),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(

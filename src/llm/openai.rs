@@ -175,9 +175,21 @@ impl LlmProvider for OpenAiProvider {
             json!({ "role": "user", "content": user_message }),
         ];
         let mut acc = ToolAccumulator::default();
+        // Track (tool_name, args_json) pairs to detect repeated identical calls.
+        let mut seen_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for iteration in 1..=MAX_ITERATIONS {
-            let response = self.chat(&messages, &tool_defs).await?;
+            // One iteration before the hard limit, nudge the model to wrap up.
+            if iteration == MAX_ITERATIONS {
+                messages.push(json!({
+                    "role": "user",
+                    "content": "You have reached the tool call limit. \
+                                Do NOT call any more tools. \
+                                Write your final trading decision and summary now."
+                }));
+            }
+
+            let response = self.chat(&messages, if iteration == MAX_ITERATIONS { &[] } else { &tool_defs }).await?;
             let choice = response
                 .get("choices")
                 .and_then(|c| c.get(0))
@@ -192,12 +204,10 @@ impl LlmProvider for OpenAiProvider {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                // Append the final assistant message so the conversation is complete.
                 messages.push(message.clone());
                 return Ok(acc.finish(final_response, iteration, messages));
             };
 
-            // Echo the assistant's tool-call message back into the history.
             messages.push(message.clone());
 
             for call in &tool_calls {
@@ -210,28 +220,34 @@ impl LlmProvider for OpenAiProvider {
                     .map(|s| serde_json::from_str(s).unwrap_or(json!({})))
                     .unwrap_or(json!({}));
 
-                let is_order = executor.is_order_tool(name);
-                let (result, intercepted, outcome, detail) =
-                    match executor.execute(name, args.clone()).await {
-                        Ok(v) => {
-                            let intercepted = v.get("status").and_then(Value::as_str)
-                                == Some("dry_run")
-                                || v.get("simulated").and_then(Value::as_bool) == Some(true);
-                            let outcome = if intercepted { "simulated" } else { "placed" };
-                            (v, intercepted, outcome.to_string(), None)
-                        }
-                        Err(e) => (
-                            json!({ "error": e.to_string() }),
-                            true,
-                            "rejected".to_string(),
-                            Some(e.to_string()),
-                        ),
-                    };
-
-                acc.record(name, &args, &result, intercepted);
-                if is_order {
-                    acc.push_order(order_attempt_from(name, &args, &outcome, detail));
-                }
+                // Skip duplicate calls — return a cached hint so the model moves on.
+                let call_key = format!("{name}:{args}");
+                let result = if !seen_calls.insert(call_key) {
+                    json!({ "note": "duplicate call — you already have this result above. Do not call this tool again." })
+                } else {
+                    let is_order = executor.is_order_tool(name);
+                    let (res, intercepted, outcome, detail) =
+                        match executor.execute(name, args.clone()).await {
+                            Ok(v) => {
+                                let intercepted = v.get("status").and_then(Value::as_str)
+                                    == Some("dry_run")
+                                    || v.get("simulated").and_then(Value::as_bool) == Some(true);
+                                let outcome = if intercepted { "simulated" } else { "placed" };
+                                (v, intercepted, outcome.to_string(), None)
+                            }
+                            Err(e) => (
+                                json!({ "error": e.to_string() }),
+                                true,
+                                "rejected".to_string(),
+                                Some(e.to_string()),
+                            ),
+                        };
+                    acc.record(name, &args, &res, intercepted);
+                    if is_order {
+                        acc.push_order(order_attempt_from(name, &args, &outcome, detail));
+                    }
+                    res
+                };
 
                 messages.push(json!({
                     "role": "tool",
@@ -241,8 +257,12 @@ impl LlmProvider for OpenAiProvider {
             }
         }
 
-        Err(TraderError::Llm(format!(
-            "agent loop exceeded {MAX_ITERATIONS} iterations without a final answer"
-        )))
+        // Graceful fallback: return what we have rather than erroring the whole cycle.
+        tracing::warn!("agent loop reached {MAX_ITERATIONS} iterations; returning partial result");
+        Ok(acc.finish(
+            format!("Cycle reached the {MAX_ITERATIONS}-iteration limit. Check audit log for tool calls made."),
+            MAX_ITERATIONS,
+            messages,
+        ))
     }
 }

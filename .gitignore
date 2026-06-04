@@ -30,3 +30,7 @@ simulation/
 
 # Claude Code session data
 .claude/
+
+# macOS
+.DS_Store
+**/.DS_Store

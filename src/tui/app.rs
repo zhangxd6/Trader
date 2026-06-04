@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 
 use crate::config::StrategyConfig;
 
@@ -63,7 +63,14 @@ pub struct LogEntry {
 pub struct PositionRow {
     pub symbol: String,
     pub quantity: f64,
-    pub price: f64,
+    /// Average cost per share (what was paid).
+    pub avg_cost: f64,
+    /// Current market price per share (used for live mode; equals avg_cost in simulation).
+    #[allow(dead_code)]
+    pub current_price: f64,
+    /// Dollar gain/loss: (current_price - avg_cost) * quantity.
+    pub gain_usd: f64,
+    /// Percentage gain/loss vs cost basis.
     pub pnl_pct: f64,
 }
 
@@ -107,6 +114,8 @@ pub struct App {
     pub should_quit: bool,
     /// Latest reasoning text from the LLM (why it traded or held).
     pub latest_reasoning: Option<String>,
+    /// When the latest reasoning was received (local time for display).
+    pub latest_reasoning_at: Option<DateTime<Local>>,
     /// Which panel receives scroll key events.
     pub focused_panel: FocusedPanel,
     /// Vertical scroll offset for the Strategy panel.
@@ -117,7 +126,7 @@ pub struct App {
     pub logs_scroll: u16,
 }
 
-const MAX_LOGS: usize = 20;
+const MAX_LOGS: usize = 200;
 
 impl App {
     pub fn new(strategies: Vec<StrategyConfig>, mode: RunMode) -> Self {
@@ -133,6 +142,7 @@ impl App {
             market_open: false,
             should_quit: false,
             latest_reasoning: None,
+            latest_reasoning_at: None,
             focused_panel: FocusedPanel::Reasoning,
             strategy_scroll: 0,
             reasoning_scroll: 0,

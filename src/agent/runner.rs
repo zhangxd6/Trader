@@ -108,17 +108,23 @@ impl TradingAgent {
         // Surface each tool call and order to the TUI log.
         for call in &result.tool_calls_made {
             let level = if self.executor.is_order_tool(&call.tool) {
-                // An intercepted order was blocked (dry-run) or rejected (safety).
-                if call.intercepted {
-                    LogLevel::Safety
-                } else {
-                    LogLevel::Order
-                }
+                // Simulated orders were actually executed (in the virtual portfolio);
+                // only true dry-run blocks and safety rejections are Safety-level.
+                let was_executed = call.result
+                    .get("simulated")
+                    .and_then(|v| v.as_bool())
+                    == Some(true)
+                    || !call.intercepted;
+                if was_executed { LogLevel::Order } else { LogLevel::Safety }
             } else {
                 LogLevel::Mcp
             };
-            self.emit(level, format!("{} {}", call.tool, summarize(&call.arguments)))
-                .await;
+            let msg = if self.executor.is_order_tool(&call.tool) {
+                order_log_message(&call.tool, &call.arguments, &call.result)
+            } else {
+                format!("{} {}", call.tool, summarize(&call.arguments))
+            };
+            self.emit(level, msg).await;
         }
         let executed = result
             .orders_attempted
@@ -212,10 +218,15 @@ impl TradingAgent {
              === INSTRUCTIONS ===\n\
              - {scope_instruction}\n\
              {industry_instruction}\
+             - TOOL CALL BUDGET: you have at most 8 tool calls this cycle. Plan ahead:\n\
+               1. get_portfolio (1 call)\n\
+               2. get_equity_quotes or get_stock_fundamentals for candidates (1-3 calls)\n\
+               3. Place one order if warranted, or decide to HOLD (0-1 calls)\n\
+               Do NOT call the same tool twice with the same arguments.\n\
              - ALWAYS read the portfolio and fetch quotes with the available tools BEFORE ordering.\n\
              - HOLD is always acceptable; only trade when the rules clearly support it.\n\
              - When you place an order, include the symbol, quantity, and (if known) price.\n\
-             - When finished, summarise what you did and why in 2-4 sentences.",
+             - When finished, STOP calling tools and write your summary in 2-4 sentences.",
             mode = self.mode.label(),
             name = self.strategy.name,
             description = self.strategy.description,
@@ -260,11 +271,17 @@ impl TradingAgent {
             let positions = p
                 .positions
                 .values()
-                .map(|pos| PositionRow {
-                    symbol: pos.symbol.clone(),
-                    quantity: pos.quantity,
-                    price: pos.avg_cost,
-                    pnl_pct: 0.0,
+                .map(|pos| {
+                    // No live price available between cycles; use avg_cost as proxy.
+                    let cost_total = pos.avg_cost * pos.quantity;
+                    PositionRow {
+                        symbol: pos.symbol.clone(),
+                        quantity: pos.quantity,
+                        avg_cost: pos.avg_cost,
+                        current_price: pos.avg_cost,
+                        gain_usd: 0.0,
+                        pnl_pct: if cost_total > 0.0 { 0.0 } else { 0.0 },
+                    }
                 })
                 .collect();
             return Some(PortfolioSnapshot {
@@ -366,12 +383,18 @@ fn parse_portfolio_snapshot(value: &Value) -> PortfolioSnapshot {
             arr.iter()
                 .filter_map(|item| {
                     let symbol = item.get("symbol").and_then(Value::as_str)?.to_string();
+                    let quantity = first_f64(item, &["quantity", "qty", "shares"]).unwrap_or(0.0);
+                    let avg_cost = first_f64(item, &["average_buy_price", "avg_cost", "cost_basis", "average_price"]).unwrap_or(0.0);
+                    let current_price = first_f64(item, &["current_price", "price", "last_price"]).unwrap_or(avg_cost);
+                    let gain_usd = (current_price - avg_cost) * quantity;
+                    let pnl_pct = if avg_cost > 0.0 { (current_price - avg_cost) / avg_cost * 100.0 } else { 0.0 };
                     Some(PositionRow {
                         symbol,
-                        quantity: first_f64(item, &["quantity", "qty", "shares"]).unwrap_or(0.0),
-                        price: first_f64(item, &["current_price", "price", "last_price"])
-                            .unwrap_or(0.0),
-                        pnl_pct: first_f64(item, &["unrealized_pnl_pct", "pnl_pct"]).unwrap_or(0.0),
+                        quantity,
+                        avg_cost,
+                        current_price,
+                        gain_usd,
+                        pnl_pct,
                     })
                 })
                 .collect()
@@ -405,6 +428,38 @@ fn first_f64(value: &Value, keys: &[&str]) -> Option<f64> {
 fn summarize(args: &Value) -> String {
     let s = args.to_string();
     truncate(&s, 60)
+}
+
+/// Rich one-line message for an order tool call, e.g. "BUY ANET $125 (simulated)".
+fn order_log_message(tool: &str, args: &Value, result: &Value) -> String {
+    let side = args.get("side").and_then(Value::as_str)
+        .or_else(|| if tool.to_lowercase().contains("buy") { Some("buy") }
+                    else if tool.to_lowercase().contains("sell") { Some("sell") }
+                    else { None })
+        .unwrap_or("order")
+        .to_uppercase();
+
+    let symbol = args.get("symbol").and_then(Value::as_str).unwrap_or("?");
+
+    let amount = args.get("dollar_amount").and_then(Value::as_str)
+        .map(|s| format!("${s}"))
+        .or_else(|| args.get("quantity").and_then(Value::as_f64).map(|q| format!("{q:.4} sh")))
+        .unwrap_or_default();
+
+    let status = if result.get("simulated").and_then(Value::as_bool) == Some(true) {
+        let price = result.get("price").and_then(Value::as_f64)
+            .map(|p| format!(" @ ${p:.2}"))
+            .unwrap_or_default();
+        format!("simulated{price}")
+    } else if result.get("status").and_then(Value::as_str) == Some("dry_run") {
+        "dry-run blocked".to_string()
+    } else if result.get("error").is_some() {
+        format!("rejected: {}", truncate(&result["error"].to_string(), 40))
+    } else {
+        "placed".to_string()
+    };
+
+    format!("{side} {symbol} {amount} ({status})")
 }
 
 fn truncate(s: &str, max: usize) -> String {

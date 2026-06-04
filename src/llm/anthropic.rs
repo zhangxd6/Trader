@@ -109,10 +109,23 @@ impl LlmProvider for AnthropicProvider {
         let tool_defs = Self::tool_defs(tools);
         let mut messages = vec![json!({ "role": "user", "content": user_message })];
         let mut acc = ToolAccumulator::default();
+        let mut seen_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for iteration in 1..=MAX_ITERATIONS {
+            // On the final iteration, inject a wrap-up nudge and strip tools so the
+            // model is forced to produce a text answer.
+            let active_tools = if iteration == MAX_ITERATIONS { &[][..] } else { &tool_defs[..] };
+            if iteration == MAX_ITERATIONS {
+                messages.push(json!({
+                    "role": "user",
+                    "content": "You have reached the tool call limit. \
+                                Do NOT use any more tools. \
+                                Write your final trading decision and summary now."
+                }));
+            }
+
             let response = self
-                .messages(system_prompt, &messages, &tool_defs)
+                .messages(system_prompt, &messages, active_tools)
                 .await?;
             let content = response
                 .get("content")
@@ -124,7 +137,6 @@ impl LlmProvider for AnthropicProvider {
                 .and_then(Value::as_str)
                 .unwrap_or("");
 
-            // Collect any text and tool_use blocks from the assistant turn.
             let mut text_out = String::new();
             let mut tool_uses: Vec<&Value> = Vec::new();
             for block in &content {
@@ -140,14 +152,12 @@ impl LlmProvider for AnthropicProvider {
             }
 
             if stop_reason != "tool_use" || tool_uses.is_empty() {
-                // Prepend the system prompt so the saved conversation is self-contained.
                 let mut conv = vec![json!({ "role": "system", "content": system_prompt })];
                 conv.extend(messages.clone());
                 conv.push(json!({ "role": "assistant", "content": &content }));
                 return Ok(acc.finish(text_out, iteration, conv));
             }
 
-            // Record the assistant turn verbatim, then answer each tool_use.
             messages.push(json!({ "role": "assistant", "content": content }));
 
             let mut tool_results = Vec::new();
@@ -156,28 +166,33 @@ impl LlmProvider for AnthropicProvider {
                 let name = block.get("name").and_then(Value::as_str).unwrap_or("");
                 let args = block.get("input").cloned().unwrap_or(json!({}));
 
-                let is_order = executor.is_order_tool(name);
-                let (result, intercepted, outcome, detail) =
-                    match executor.execute(name, args.clone()).await {
-                        Ok(v) => {
-                            let intercepted = v.get("status").and_then(Value::as_str)
-                                == Some("dry_run")
-                                || v.get("simulated").and_then(Value::as_bool) == Some(true);
-                            let outcome = if intercepted { "simulated" } else { "placed" };
-                            (v, intercepted, outcome.to_string(), None)
-                        }
-                        Err(e) => (
-                            json!({ "error": e.to_string() }),
-                            true,
-                            "rejected".to_string(),
-                            Some(e.to_string()),
-                        ),
-                    };
-
-                acc.record(name, &args, &result, intercepted);
-                if is_order {
-                    acc.push_order(order_attempt_from(name, &args, &outcome, detail));
-                }
+                let call_key = format!("{name}:{args}");
+                let result = if !seen_calls.insert(call_key) {
+                    json!({ "note": "duplicate call — you already have this result above. Do not call this tool again." })
+                } else {
+                    let is_order = executor.is_order_tool(name);
+                    let (res, intercepted, outcome, detail) =
+                        match executor.execute(name, args.clone()).await {
+                            Ok(v) => {
+                                let intercepted = v.get("status").and_then(Value::as_str)
+                                    == Some("dry_run")
+                                    || v.get("simulated").and_then(Value::as_bool) == Some(true);
+                                let outcome = if intercepted { "simulated" } else { "placed" };
+                                (v, intercepted, outcome.to_string(), None)
+                            }
+                            Err(e) => (
+                                json!({ "error": e.to_string() }),
+                                true,
+                                "rejected".to_string(),
+                                Some(e.to_string()),
+                            ),
+                        };
+                    acc.record(name, &args, &res, intercepted);
+                    if is_order {
+                        acc.push_order(order_attempt_from(name, &args, &outcome, detail));
+                    }
+                    res
+                };
 
                 tool_results.push(json!({
                     "type": "tool_result",
@@ -189,8 +204,14 @@ impl LlmProvider for AnthropicProvider {
             messages.push(json!({ "role": "user", "content": tool_results }));
         }
 
-        Err(TraderError::Llm(format!(
-            "agent loop exceeded {MAX_ITERATIONS} iterations without a final answer"
-        )))
+        // Graceful fallback — return partial result rather than erroring the cycle.
+        tracing::warn!("agent loop reached {MAX_ITERATIONS} iterations; returning partial result");
+        let mut conv = vec![json!({ "role": "system", "content": system_prompt })];
+        conv.extend(messages);
+        Ok(acc.finish(
+            format!("Cycle reached the {MAX_ITERATIONS}-iteration limit. Check audit log for tool calls made."),
+            MAX_ITERATIONS,
+            conv,
+        ))
     }
 }

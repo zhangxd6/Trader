@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::error::Result;
 use crate::llm::ToolExecutor;
-use super::{news, search};
+use super::{news, quotes, search};
 
 /// A [`ToolExecutor`] that intercepts research tool calls and satisfies them
 /// locally (via HTTP to Yahoo Finance / Brave / DuckDuckGo), forwarding all
@@ -53,6 +53,13 @@ impl ToolExecutor for ResearchExecutor {
                     .and_then(Value::as_u64)
                     .unwrap_or(8) as usize;
                 news::get_stock_news(&self.client, symbol, max_items).await
+            }
+            "get_stock_fundamentals" => {
+                let symbol = args
+                    .get("symbol")
+                    .and_then(Value::as_str)
+                    .unwrap_or("UNKNOWN");
+                quotes::get_stock_fundamentals(&self.client, symbol).await
             }
             "web_search" => {
                 let query = args

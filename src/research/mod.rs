@@ -4,6 +4,7 @@
 
 mod executor;
 mod news;
+mod quotes;
 mod search;
 
 pub use executor::ResearchExecutor;
@@ -37,6 +38,20 @@ pub fn research_tools() -> Vec<McpTool> {
                 "properties": {
                     "symbol": { "type": "string" },
                     "max_items": { "type": "integer", "default": 8 }
+                },
+                "required": ["symbol"]
+            }),
+        },
+        McpTool {
+            name: "get_stock_fundamentals".to_string(),
+            description: "Fetch key fundamentals for a stock from Yahoo Finance: 52-week high/low, \
+                current price, % below 52w high, today's volume vs average volume, P/E ratio, \
+                and market cap. Use this to evaluate buy filters accurately before placing orders."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "symbol": { "type": "string" }
                 },
                 "required": ["symbol"]
             }),
