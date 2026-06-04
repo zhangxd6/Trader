@@ -366,10 +366,19 @@ fn format_buy_filters(f: &BuyFilters) -> String {
         parts.push(format!("P/E < {pe}"));
     }
     if let Some(h) = f.max_price_vs_52w_high_pct {
-        parts.push(format!("price < {h}% of 52w high"));
+        let min_pct_below = 100.0 - h;
+        parts.push(format!(
+            "pct_from_52w_high >= {min_pct_below:.1}% \
+             (i.e. price must be at least {min_pct_below:.1}% BELOW the 52-week high; \
+             get_stock_fundamentals returns pct_from_52w_high directly — use that field, \
+             do NOT recompute it)"
+        ));
     }
     if let Some(v) = f.min_volume_ratio {
-        parts.push(format!("volume > {v}x avg"));
+        parts.push(format!(
+            "volume_ratio >= {v:.2} \
+             (get_stock_fundamentals returns volume_ratio directly — use that field)"
+        ));
     }
     if parts.is_empty() {
         "none".to_string()

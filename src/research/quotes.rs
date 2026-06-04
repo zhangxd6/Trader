@@ -92,11 +92,18 @@ pub async fn get_stock_fundamentals(client: &Client, symbol: &str) -> Result<Val
         "52w_high": round2(week52_high),
         "52w_low": round2(week52_low),
         "pct_from_52w_high": round2(pct_from_52w_high),
+        "pct_from_52w_high_meaning": format!(
+            "current price is {:.2}% BELOW the 52-week high — larger = deeper dip. \
+             Compare this number directly against the buy filter threshold (no arithmetic needed).",
+            round2(pct_from_52w_high)
+        ),
         "avg_volume_1y": avg_vol_1y as u64,
         "volume_today": volume_today as u64,
         "volume_ratio": round2(volume_ratio),
-        "note": "Use pct_from_52w_high to evaluate the max_price_vs_52w_high_pct buy filter. \
-                 volume_ratio compares today vs 1-year daily average."
+        "volume_ratio_meaning": format!(
+            "today's volume is {:.2}x the 1-year daily average — compare directly against filter.",
+            round2(volume_ratio)
+        ),
     }))
 }
 
