@@ -226,6 +226,10 @@ impl TradingAgent {
              === INSTRUCTIONS ===\n\
              - {scope_instruction}\n\
              {industry_instruction}\
+             - PARTIAL SHARES: Robinhood supports fractional shares. You may specify a\n\
+               dollar_amount instead of a whole-share quantity when placing orders.\n\
+               Example: {{ \"symbol\": \"AAPL\", \"dollar_amount\": \"50.00\" }} buys $50 worth of AAPL.\n\
+               Use dollar amounts when a whole share would exceed the trade cap.\n\
              - TOOL CALL BUDGET: you have at most 8 tool calls this cycle. Plan ahead:\n\
                1. get_portfolio (1 call)\n\
                2. get_equity_quotes or get_stock_fundamentals for each open position AND candidate (1-3 calls)\n\

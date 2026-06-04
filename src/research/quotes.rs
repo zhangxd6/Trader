@@ -70,17 +70,31 @@ pub async fn get_stock_fundamentals(client: &Client, symbol: &str) -> Result<Val
         0.0
     };
 
-    let avg_volume   = meta.get("regularMarketDayVolume").and_then(Value::as_f64).unwrap_or(0.0);
-    let volume_today = avg_volume; // best available without a separate quote call
-
-    // Compute true average volume from the daily series.
+    // Build the full daily volume series from the historical OHLCV array.
+    // Yahoo's meta.regularMarketDayVolume is 0 when the market is closed or
+    // hasn't traded yet, so we derive volume_today from the last non-zero entry
+    // in the series instead.
     let daily_volumes: Vec<f64> = body
         .pointer("/chart/result/0/indicators/quote/0/volume")
         .and_then(Value::as_array)
-        .map(|arr| arr.iter().filter_map(Value::as_f64).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    // Volume entries may be integers or floats in Yahoo's response.
+                    v.as_f64()
+                        .or_else(|| v.as_i64().map(|n| n as f64))
+                        .filter(|&n| n > 0.0)
+                })
+                .collect()
+        })
         .unwrap_or_default();
+
+    let volume_today = daily_volumes.last().copied()
+        .or_else(|| meta.get("regularMarketDayVolume").and_then(Value::as_f64).filter(|&v| v > 0.0))
+        .unwrap_or(0.0);
+
     let avg_vol_1y = if daily_volumes.is_empty() {
-        avg_volume
+        volume_today
     } else {
         daily_volumes.iter().sum::<f64>() / daily_volumes.len() as f64
     };
