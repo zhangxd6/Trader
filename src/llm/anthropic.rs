@@ -158,6 +158,8 @@ impl LlmProvider for AnthropicProvider {
                 return Ok(acc.finish(text_out, iteration, conv));
             }
 
+            // Capture intermediate text emitted alongside tool calls.
+            acc.push_text(&text_out);
             messages.push(json!({ "role": "assistant", "content": content }));
 
             let mut tool_results = Vec::new();

@@ -172,15 +172,20 @@ impl TradingAgent {
         };
         self.audit.log(&entry).await?;
 
-        if !result.final_response.is_empty() {
+        let display_reasoning = if !result.full_reasoning.is_empty() {
+            &result.full_reasoning
+        } else {
+            &result.final_response
+        };
+        if !display_reasoning.is_empty() {
             self.emit(LogLevel::Llm, truncate(&result.final_response, 120))
                 .await;
             // Send full reasoning to TUI panel, or print to stdout in headless mode.
             if self.events.is_some() {
-                self.send(AppEvent::Reasoning(result.final_response.clone())).await;
+                self.send(AppEvent::Reasoning(display_reasoning.to_string())).await;
             } else {
                 println!("\n─── REASONING ───────────────────────────────────────");
-                println!("{}", result.final_response);
+                println!("{display_reasoning}");
                 println!("─────────────────────────────────────────────────────\n");
             }
         }
@@ -208,10 +213,13 @@ impl TradingAgent {
              Operating mode: {mode}.\n\n\
              STRATEGY: {name}\n{description}\n\n\
              === HARD RULES (enforced by the system; violations are rejected) ===\n\
-             - Stop-loss:     SELL any position down more than {stop:.1}%\n\
-             - Take-profit:   SELL any position up more than {take:.1}%\n\
+             - Stop-loss:     SELL a position only if its current market price (from live quotes)\n\
+               is confirmed to be more than {stop:.1}% below your average cost. Do NOT sell\n\
+               based on assumed or missing price data.\n\
+             - Take-profit:   SELL a position only if current market price is confirmed to be\n\
+               more than {take:.1}% above your average cost.\n\
              - Max positions: {maxpos} simultaneous holdings\n\
-             - Min confidence: {minconf:.2} (do not act below this)\n\
+             - Min confidence: {minconf:.2} — if you are not confident, HOLD.\n\
              - Buy filters:   {filters}\n\
              - Per-trade cap and position-size caps are enforced; oversized orders are rejected.\n\n\
              === JUDGMENT RULES (apply your reasoning) ===\n{judgment}\n\n\
@@ -220,11 +228,12 @@ impl TradingAgent {
              {industry_instruction}\
              - TOOL CALL BUDGET: you have at most 8 tool calls this cycle. Plan ahead:\n\
                1. get_portfolio (1 call)\n\
-               2. get_equity_quotes or get_stock_fundamentals for candidates (1-3 calls)\n\
-               3. Place one order if warranted, or decide to HOLD (0-1 calls)\n\
+               2. get_equity_quotes or get_stock_fundamentals for each open position AND candidate (1-3 calls)\n\
+               3. Place one order only if rules clearly support it, otherwise HOLD (0-1 calls)\n\
                Do NOT call the same tool twice with the same arguments.\n\
-             - ALWAYS read the portfolio and fetch quotes with the available tools BEFORE ordering.\n\
-             - HOLD is always acceptable; only trade when the rules clearly support it.\n\
+             - ALWAYS fetch live quotes for any open position before evaluating stop-loss or take-profit.\n\
+             - When price data is unavailable or uncertain, default to HOLD.\n\
+             - HOLD is always acceptable; only trade when the rules clearly and confidently support it.\n\
              - When you place an order, include the symbol, quantity, and (if known) price.\n\
              - When finished, STOP calling tools and write your summary in 2-4 sentences.",
             mode = self.mode.label(),

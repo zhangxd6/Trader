@@ -128,6 +128,18 @@ impl SafetyValidator {
             return Err(reject("sells are disabled by risk config"));
         }
 
+        // Sell guard: can only sell a symbol we actually hold.
+        // Skip the check if the portfolio has never been observed (no data yet).
+        if !is_buy {
+            let view = self.portfolio.read().await;
+            let portfolio_known = !view.position_value.is_empty() || view.cash.is_some();
+            if portfolio_known && !view.position_value.contains_key(&symbol) {
+                return Err(reject(&format!(
+                    "cannot sell {symbol}: no position found in portfolio"
+                )));
+            }
+        }
+
         // Daily trade cap.
         let count = self.counter.write().await.current();
         if count >= self.risk.max_daily_trades {
@@ -208,9 +220,13 @@ impl SafetyValidator {
         if let Some(items) = positions {
             for item in items {
                 if let Some(sym) = first_str(&item, &["symbol", "ticker"]) {
-                    if let Some(val) = first_f64(&item, &["market_value", "value", "equity"]) {
-                        view.position_value.insert(sym.to_uppercase(), val);
-                    }
+                    let sym_upper = sym.to_uppercase();
+                    // Record market value when available; fall back to quantity as a
+                    // presence marker so the sell-guard knows we hold the position.
+                    let val = first_f64(&item, &["market_value", "value", "equity"])
+                        .or_else(|| first_f64(&item, &["quantity", "qty", "shares"]))
+                        .unwrap_or(1.0); // any positive value marks the position as held
+                    view.position_value.insert(sym_upper, val);
                 }
             }
         }
@@ -351,6 +367,56 @@ mod tests {
         let v = SafetyValidator::new(Arc::new(NoopInner), risk(false), &strategy());
         let out = v
             .execute("place_order", json!({ "symbol": "AAPL", "quantity": 1, "price": 100 }))
+            .await
+            .unwrap();
+        assert_eq!(out["state"], json!("filled"));
+    }
+
+    #[tokio::test]
+    async fn rejects_sell_of_unowned_symbol() {
+        let v = SafetyValidator::new(Arc::new(NoopInner), risk(false), &strategy());
+        // Seed the portfolio view with cash so it's considered "known".
+        {
+            let mut view = v.portfolio.write().await;
+            view.cash = Some(1000.0);
+            // AAPL is not added — simulates having no position in it.
+        }
+        let err = v
+            .execute(
+                "place_order",
+                json!({ "symbol": "AAPL", "side": "sell", "quantity": 1, "price": 100 }),
+            )
+            .await;
+        assert!(matches!(err, Err(TraderError::SafetyRejection(_))));
+    }
+
+    #[tokio::test]
+    async fn allows_sell_of_owned_symbol() {
+        let v = SafetyValidator::new(Arc::new(NoopInner), risk(false), &strategy());
+        {
+            let mut view = v.portfolio.write().await;
+            view.cash = Some(500.0);
+            view.position_value.insert("AAPL".into(), 100.0);
+        }
+        let out = v
+            .execute(
+                "place_order",
+                json!({ "symbol": "AAPL", "side": "sell", "quantity": 1, "price": 100 }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out["state"], json!("filled"));
+    }
+
+    #[tokio::test]
+    async fn allows_sell_when_portfolio_unknown() {
+        // If we haven't observed the portfolio yet, don't block sells.
+        let v = SafetyValidator::new(Arc::new(NoopInner), risk(false), &strategy());
+        let out = v
+            .execute(
+                "place_order",
+                json!({ "symbol": "AAPL", "side": "sell", "quantity": 1, "price": 100 }),
+            )
             .await
             .unwrap();
         assert_eq!(out["state"], json!("filled"));

@@ -208,6 +208,10 @@ impl LlmProvider for OpenAiProvider {
                 return Ok(acc.finish(final_response, iteration, messages));
             };
 
+            // Capture any text the model emitted alongside the tool calls.
+            if let Some(text) = message.get("content").and_then(Value::as_str) {
+                acc.push_text(text);
+            }
             messages.push(message.clone());
 
             for call in &tool_calls {

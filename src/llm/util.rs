@@ -9,6 +9,8 @@ use crate::llm::models::{AgentLoopResult, OrderAttempt, ToolCallRecord};
 pub struct ToolAccumulator {
     tool_calls: Vec<ToolCallRecord>,
     orders: Vec<OrderAttempt>,
+    /// All assistant text from every turn (intermediate + final).
+    text_parts: Vec<String>,
 }
 
 impl ToolAccumulator {
@@ -27,15 +29,28 @@ impl ToolAccumulator {
         self.orders.push(order);
     }
 
+    /// Append assistant text emitted during an intermediate turn (alongside tool calls).
+    pub fn push_text(&mut self, text: &str) {
+        if !text.trim().is_empty() {
+            self.text_parts.push(text.to_string());
+        }
+    }
+
     /// Finalise into an [`AgentLoopResult`].
     pub fn finish(
-        self,
+        mut self,
         final_response: String,
         iterations: u32,
         conversation: Vec<serde_json::Value>,
     ) -> AgentLoopResult {
+        // Include the final response in the full reasoning too.
+        if !final_response.trim().is_empty() {
+            self.text_parts.push(final_response.clone());
+        }
+        let full_reasoning = self.text_parts.join("\n\n");
         AgentLoopResult {
             final_response,
+            full_reasoning,
             tool_calls_made: self.tool_calls,
             orders_attempted: self.orders,
             iterations,

@@ -31,8 +31,11 @@ pub struct OrderAttempt {
 /// The result of running a full agentic tool-calling loop for one cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentLoopResult {
-    /// The LLM's final natural-language summary.
+    /// The LLM's final natural-language summary (last assistant turn only).
     pub final_response: String,
+    /// All assistant text from every turn concatenated — includes intermediate
+    /// analysis emitted alongside tool calls, not just the closing summary.
+    pub full_reasoning: String,
     /// Every tool call made during the loop.
     pub tool_calls_made: Vec<ToolCallRecord>,
     /// Order attempts extracted from the tool calls.

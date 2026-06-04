@@ -289,6 +289,7 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
     let lines: Vec<Line> = app
         .log_buffer
         .iter()
+        .rev()
         .map(|entry| {
             let color = match entry.level {
                 LogLevel::Error  => Color::Red,
